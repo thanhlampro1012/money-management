@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#13705c" />
+    <meta name="description" content="Money Management: quản lý thu chi cá nhân, theo dõi số dư các ví, lập ngân sách và quản lý mục tiêu tiết kiệm." />
+    <title>Money Management · Quản lý thu chi cá nhân</title>
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <script>(()=>{let p='system';try{const v=localStorage.getItem('money-management:theme');if(['light','dark','system'].includes(v))p=v;}catch{}const dark=p==='dark'||(p==='system'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';document.documentElement.style.colorScheme=dark?'dark':'light';})();</script>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Bỏ qua điều hướng, đến nội dung chính</a>
+    <div id="app"></div>
+    <div id="modal-root"></div>
+    <div id="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
+    <noscript><div class="noscript-notice"><strong>Money Management cần JavaScript để hoạt động.</strong><p>Hãy bật JavaScript trong trình duyệt rồi tải lại trang.</p></div></noscript>
+  </body>
+</html>

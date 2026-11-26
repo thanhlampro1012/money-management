@@ -1,0 +1,25 @@
+name: Money Management CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Kiểm tra cú pháp và dữ liệu
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Lấy mã nguồn
+        uses: actions/checkout@v4
+      - name: Thiết lập Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Kiểm tra cú pháp
+        run: npm run check
+      - name: Chạy kiểm thử
+        run: npm test
