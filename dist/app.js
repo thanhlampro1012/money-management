@@ -3,6 +3,9 @@ import { getCategories, createEmptyState, createDemoState, localDate, monthKey, 
 import { LedgerStore } from './storage.js';
 import { makeExcel, EXCEL_MIME, excelFilename } from './export.js';
 import { initTheme, getThemePreference, getResolvedTheme, setThemePreference } from './theme.js';
+import { BackupManager } from './backup.js';
+import { parseVndAmount, formatVndInput } from './input.js';
+import { initPwa, renderPwaSettings } from './pwa.js';
 
 initTheme();
 const ledger = new LedgerStore();
@@ -50,7 +53,26 @@ let storageIssue = '', corruptRaw = null, lastFocus = null;
 let formDirty = false;
 let pendingStorageRefresh = false;
 let profileDraft = null;
+let backupsReady = false, backupNeedsRecovery = false, backupNotice = '';
+let importRequest = 0, dialogRevision = 0, updateInProgress = false;
+const mobileNavigation = matchMedia('(max-width: 850px)');
+const primaryMissingAtBoot = readPrimaryRaw() === null;
 let state = loadState();
+let backups = null;
+backups = new BackupManager({
+  getCurrentRaw: readPrimaryRaw,
+  getCurrentState: () => {
+    const raw = readPrimaryRaw();
+    if (raw === null) throw new Error('Bản lưu chính chưa sẵn sàng.');
+    return validateState(JSON.parse(raw));
+  },
+  download: (content, filename) => download(content, filename, 'application/json;charset=utf-8'),
+  onChange: () => { if (backups) refreshBackupStatus(); },
+});
+
+function readPrimaryRaw() {
+  try { return localStorage.getItem(KEY); } catch { return undefined; }
+}
 
 function loadState() {
   const result = ledger.load();
@@ -72,17 +94,25 @@ function sanitizeFilters() {
   if (ui.categoryId !== 'all' && !category(ui.categoryId)) ui.categoryId = 'all';
 }
 
-function commit(next, { replace = false } = {}) {
+function commit(next, { replace = false, reason = 'Cập nhật sổ' } = {}) {
+  if (!backupsReady) { toast('Đang mở sổ và kiểm tra bản sao. Hãy lưu lại sau một chút.', true); return false; }
+  if (backupNeedsRecovery && !replace) { toast('Có lịch sử của sổ trước. Hãy chọn khôi phục hoặc xác nhận dùng sổ trống trong Cài đặt trước khi ghi tiếp.', true); return false; }
+  const previous = JSON.stringify(state);
+  let previousPersistedState = null;
+  try { const raw=readPrimaryRaw(); if(typeof raw==='string')previousPersistedState=validateState(JSON.parse(raw)); } catch { /* Preserve broken primary bytes through the existing recovery flow. */ }
   try {
     state = ledger.save(next, { replace });
     storageIssue = ''; corruptRaw = null;
-    if (replace) profileDraft = null;
-    sanitizeFilters(); render(); return true;
+    if (replace) { profileDraft = null; backupNeedsRecovery = false; }
   } catch (error) {
     if (error.code === 'CONFLICT') {
       pendingStorageRefresh = false;
-      closeModal(true);
+      // Refresh the ledger, but keep the independent modal and its draft.
+      // A retry rebuilds the mutation from the new state and revalidates IDs.
       applyStorageRefresh();
+      refreshDraftChoices();
+      const fieldError = $('#modal-error');
+      if (fieldError) fieldError.textContent = 'Sổ vừa thay đổi ở tab khác. Nội dung bạn nhập vẫn được giữ. Kiểm tra lại biểu mẫu rồi bấm Lưu để áp dụng vào sổ mới nhất.';
     } else if (error.code) {
       storageIssue = error.message;
       render();
@@ -90,6 +120,20 @@ function commit(next, { replace = false } = {}) {
     toast(error.message || 'Không lưu được thay đổi. Dữ liệu hiện tại vẫn được giữ.', true);
     return false;
   }
+  if (JSON.stringify(state) !== previous) {
+    try {
+      // On the first edit after upgrade, preserve the ledger from before that
+      // edit too. History-only must never write an old state to the chosen file.
+      if(previousPersistedState)backups.record(previousPersistedState,'Trước khi thay đổi sổ',{historyOnly:true}).catch(()=>{});
+      Promise.resolve(backups.record(state, reason)).catch(() => {
+        backupNotice = 'Sổ đã lưu trên trình duyệt, nhưng bản sao tự động chưa hoàn tất. Mở Cài đặt để kiểm tra hoặc tải JSON.';
+        refreshBackupStatus();
+      });
+    } catch {
+      backupNotice = 'Sổ đã lưu trên trình duyệt. Hãy kiểm tra lại sao lưu tự động trong Cài đặt.';
+    }
+  }
+  sanitizeFilters(); render(); return true;
 }
 
 function toast(message, error = false) {
@@ -117,15 +161,17 @@ function render() {
   document.title = `${title} · Money Management`;
   $('#app').innerHTML = `<div class="app-shell">
     ${ui.menu?'<button class="mobile-overlay" data-action="close-menu" aria-label="Đóng menu"></button>':''}
-    <aside class="sidebar${ui.menu?' open':''}" aria-label="Điều hướng chính">
+    <aside id="navigation-panel" class="sidebar${ui.menu?' open':''}" aria-label="Điều hướng chính" ${mobileNavigation.matches&&!ui.menu?'inert':''}>
+      <button class="icon-btn sidebar-close" data-action="close-menu" aria-label="Đóng menu">${icon('close')}</button>
       <a class="brand" href="#overview"><span class="brand-mark">${icon('wallet')}</span><span class="brand-copy">Money Management<span>Thu chi cá nhân</span></span></a>
       <nav class="nav-list">${routes.map(([id,ico,label])=>`<a href="#${id}" class="nav-item${ui.route===id?' active':''}" ${ui.route===id?'aria-current="page"':''}>${icon(ico,'nav-icon')}<span>${label}</span>${id==='transactions'&&state.transactions.length?`<span class="nav-badge">${state.transactions.length}</span>`:''}</a>`).join('')}</nav>
       <div class="sidebar-tools"><button class="btn ghost" data-action="backup">${icon('download')}Sao lưu dữ liệu</button></div>
       <a href="#settings" class="nav-item${ui.route==='settings'?' active':''}">${icon('settings')}<span>Cài đặt & dữ liệu</span></a>
       <div class="sidebar-footer"><span class="avatar">${esc((state.profile.name||'B').charAt(0).toUpperCase())}</span><div class="user-info"><strong>${esc(state.profile.name==='Bạn'?'Sổ cá nhân':state.profile.name)}</strong><span>VND</span></div></div>
     </aside>
-    <main class="main" id="main-content"><div class="topbar"><div class="breadcrumb"><button class="icon-btn mobile-menu" data-action="open-menu" aria-label="Mở menu" aria-expanded="${ui.menu}">${icon('menu')}</button><span>Money Management</span><span class="breadcrumb-divider">/</span><strong>${title}</strong></div><div class="topbar-actions"><button class="icon-btn theme-toggle" data-action="toggle-theme" aria-label="${getResolvedTheme()==='dark'?'Bật chế độ sáng':'Bật chế độ tối'}" title="${getResolvedTheme()==='dark'?'Bật chế độ sáng':'Bật chế độ tối'}">${icon(getResolvedTheme()==='dark'?'sun':'moon')}</button><a class="storage-link" href="#settings" title="${storageIssue?'Có lỗi lưu dữ liệu':'Lưu riêng trên trình duyệt này. Chưa đồng bộ nhiều thiết bị.'}">${icon(storageIssue?'info':'check')}${storageIssue?'Kiểm tra dữ liệu':'Lưu trên thiết bị'}</a><a class="avatar" href="#settings" aria-label="Cài đặt cá nhân">${esc((state.profile.name||'B').charAt(0).toUpperCase())}</a></div></div>
-    <div class="page">${storageIssue?`<div class="storage-warning" role="alert">${icon('info')}<span>${esc(storageIssue)}</span><a href="#settings">Mở cài đặt</a></div>`:''}${renderPage()}</div><footer class="app-footer">Money Management <span>·</span> VND</footer></main></div>`;
+    <main class="main" id="main-content" ${mobileNavigation.matches&&ui.menu?'inert':''}><div class="topbar"><div class="breadcrumb"><button class="icon-btn mobile-menu" data-action="open-menu" aria-label="Mở menu" aria-controls="navigation-panel" aria-expanded="${ui.menu}">${icon('menu')}</button><span>Money Management</span><span class="breadcrumb-divider">/</span><strong>${title}</strong></div><div class="topbar-actions"><button class="icon-btn theme-toggle" data-action="toggle-theme" aria-label="${getResolvedTheme()==='dark'?'Bật chế độ sáng':'Bật chế độ tối'}" title="${getResolvedTheme()==='dark'?'Bật chế độ sáng':'Bật chế độ tối'}">${icon(getResolvedTheme()==='dark'?'sun':'moon')}</button><a class="storage-link" id="backup-save-status" href="#settings" aria-live="polite">${saveStatusMarkup()}</a><a class="avatar" href="#settings" aria-label="Cài đặt cá nhân">${esc((state.profile.name||'B').charAt(0).toUpperCase())}</a></div></div>
+    <div class="page">${storageIssue?`<div class="storage-warning" role="alert">${icon('info')}<span>${esc(storageIssue)}</span><a href="#settings">Mở cài đặt</a></div>`:''}<div id="backup-attention">${backupAttentionMarkup()}</div>${renderPage()}</div><footer class="app-footer">Money Management <span>·</span> VND</footer></main></div>`;
+  document.body.style.overflow = $('.modal') || (mobileNavigation.matches && ui.menu) ? 'hidden' : '';
 }
 
 function renderPage() {
@@ -320,21 +366,123 @@ function timestampLabel(value) {
   return value ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : 'Chưa xuất bản sao';
 }
 
+function backupTime(value) {
+  return value ? new Intl.DateTimeFormat('vi-VN', {dateStyle:'short',timeStyle:'medium'}).format(new Date(value)) : 'Chưa có';
+}
+
+function saveStatusMarkup() {
+  const s = backups?.getStatus();
+  if (storageIssue || backupNeedsRecovery) return `${icon('info')}Kiểm tra dữ liệu`;
+  if (!backupsReady) return `${icon('info')}Đang mở sổ`;
+  if (s?.mode === 'file' && ['error','needs-permission'].includes(s.fileState)) return `${icon('info')}Kiểm tra sao lưu`;
+  if (s?.mode === 'file' && s.pendingWrites) return `${icon('reset')}Đang ghi file`;
+  if (s?.mode === 'file' && s.lastFileWriteAt) return `${icon('check')}Đã sao lưu file`;
+  return `${icon('check')}Đã lưu trên máy`;
+}
+
+function backupAttentionMarkup() {
+  const s = backups?.getStatus();
+  if (backupNeedsRecovery) return `<div class="storage-warning" role="alert">${icon('info')}<span>Bản lưu chính không còn, nhưng vẫn có lịch sử của sổ trước. Hãy kiểm tra bản phục hồi trước khi ghi tiếp.</span><a href="#settings">Khôi phục sổ</a></div>`;
+  const issue = backupNotice || s?.historyIssue || (s?.mode === 'file' && ['error','needs-permission'].includes(s.fileState) ? s.fileIssue : '') || s?.downloadIssue;
+  if (issue) return `<div class="storage-warning" role="status">${icon('info')}<span>${esc(issue)}</span><a href="#settings">Kiểm tra sao lưu</a></div>`;
+  if (backupsReady && s?.mode === 'off' && state.transactions.length && ui.route !== 'settings') return `<div class="backup-reminder">${icon('shield')}<span>Đã lưu trên trình duyệt. Chọn cách sao lưu file để giữ một bản riêng.</span><a href="#settings">Thiết lập sao lưu</a></div>`;
+  return '';
+}
+
+function autoBackupMarkup() {
+  const s = backups?.getStatus();
+  if (!s?.initialized) return '<p class="helper-text" role="status">Đang kiểm tra các bản sao trên thiết bị…</p>';
+  const fileLabels = {unconfigured:'Chưa chọn file',ready:'Đang tự động cập nhật',writing:'Đang ghi bản mới', 'needs-permission':'Cần cho phép ghi lại',error:'File chưa được cập nhật',paused:'Đã tạm ngừng ghi file'};
+  return `<p>Mỗi lần bấm Lưu, sổ được ghi ngay trên trình duyệt. Chọn thêm một cách sao lưu bên dưới để giữ file JSON riêng.</p>
+    ${backupNeedsRecovery?`<div class="backup-recovery-callout"><strong>Tìm thấy ${s.snapshotCount} bản phục hồi của sổ trước</strong><p>Hãy xem lịch sử để khôi phục dữ liệu. Chỉ dùng sổ trống nếu bạn muốn bắt đầu lại.</p><div class="settings-actions"><button class="btn primary" data-action="backup-history">Xem lịch sử</button><button class="btn secondary" data-action="continue-empty">Dùng sổ trống</button></div></div>`:''}
+    <div class="backup-option"><h3>File JSON tự cập nhật</h3>
+      ${s.fileSupported?`<p>Chọn nơi lưu một lần. Sau mỗi thay đổi, app cập nhật file này khi còn quyền ghi. Giữ app mở đến khi hiện “Đã sao lưu file”.</p><div class="backup-status"><span>${fileLabels[s.fileState]||'Kiểm tra liên kết file'}</span><strong>${esc(s.fileName||'Chưa thiết lập')}</strong></div><div class="settings-actions"><button class="btn ${s.fileName?'secondary':'primary'}" data-action="choose-backup-file">${icon('download')}${s.fileName?'Đổi file':'Chọn file sao lưu'}</button>${s.fileName?`<button class="btn secondary" data-action="resume-backup-file">${s.filePermission==='granted'&&s.mode==='file'?'Cập nhật file ngay':'Cho phép ghi file'}</button><button class="btn ghost" data-action="disconnect-backup-file">Ngừng liên kết</button>`:''}</div><p class="helper-text">Ghi file thành công gần nhất: <strong>${backupTime(s.lastFileWriteAt)}</strong>.</p>`:'<p>Trình duyệt này chưa cho phép app tự ghi đè một file đã chọn. Bạn có thể dùng chế độ tải từng bản JSON bên dưới, hoặc lưu/chia sẻ bản sao vào ứng dụng Tệp.</p>'}
+      ${s.fileIssue?`<p class="field-error" role="status">${esc(s.fileIssue)}</p>`:''}
+      ${s.fileName&&!s.filePersistent?'<p class="helper-text">Liên kết file chỉ được giữ trong phiên này; hãy chọn lại khi mở app lần sau.</p>':''}
+    </div>
+    <div class="backup-option"><label class="checkbox-label backup-toggle"><input id="auto-download-backup" type="checkbox" ${s.downloadEnabled?'checked':''}><span>Tải một bản JSON sau mỗi lần lưu</span></label><p class="helper-text">Mỗi thay đổi tạo một file mới trong mục tải xuống. Hãy cho phép tải nhiều file nếu trình duyệt hỏi. Trình duyệt có thể chặn tải; app không thể xác nhận file đã được lưu vào máy.</p>${s.downloadEnabled?`<p class="helper-text">Lần yêu cầu tải gần nhất: <strong>${backupTime(s.lastDownloadAt)}</strong>. Chế độ này thay cho cập nhật một file.</p>`:''}${s.downloadIssue?`<p class="field-error">${esc(s.downloadIssue)}</p>`:''}</div>
+    <div class="backup-option"><h3>Lịch sử phục hồi tự động</h3><p>${s.historyAvailable?`Đã giữ ${s.snapshotCount} bản, tối đa 30 bản gần nhất. Bạn có thể tải hoặc khôi phục từng bản.`:'Lịch sử phục hồi chưa khả dụng trong trình duyệt này. Hãy giữ file JSON riêng.'}</p><div class="settings-actions"><button class="btn secondary" data-action="backup-history" ${s.snapshotCount?'':'disabled'}>Xem lịch sử phục hồi</button>${s.persistence==='granted'?'<span class="backup-persistence">Được ưu tiên giữ trên thiết bị</span>':`<button class="btn ghost" data-action="persist-storage">Ưu tiên giữ dữ liệu</button>`}</div><p class="helper-text">Lịch sử nằm trên cùng thiết bị. Xóa dữ liệu website hoặc mất máy có thể làm mất lịch sử; file sao lưu nên được giữ thêm trong Drive, iCloud hoặc nơi riêng của bạn.</p>${s.historyIssue?`<p class="field-error">${esc(s.historyIssue)}</p>`:''}</div>
+    ${!s.optionsPersistent?'<p class="field-error">Trình duyệt chưa ghi nhớ được lựa chọn sao lưu. Hãy kiểm tra lại sau khi mở app.</p>':''}`;
+}
+
+function refreshBackupStatus() {
+  const status = $('#backup-save-status'); if (status) status.innerHTML = saveStatusMarkup();
+  const attention = $('#backup-attention'); if (attention) attention.innerHTML = backupAttentionMarkup();
+  const panel = $('#automatic-backup-content');
+  if (panel) {
+    const focusedId = panel.contains(document.activeElement) ? document.activeElement.id : '';
+    panel.innerHTML = autoBackupMarkup();
+    if (focusedId) document.getElementById(focusedId)?.focus({preventScroll:true});
+  }
+}
+
+function backupTask(task, success = '') {
+  Promise.resolve(task).then(result => {
+    if (result?.cancelled) return;
+    backupNotice = ''; refreshBackupStatus();
+    const s = backups.getStatus();
+    const error = (s.mode==='file'&&['error','needs-permission'].includes(s.fileState)) ? s.fileIssue : '';
+    if (error) toast(error, true); else if (success) toast(success);
+  }).catch(error => { if (error?.name!=='AbortError') toast(error.message||'Không hoàn tất được sao lưu. Sổ trên trình duyệt vẫn được giữ.',true); });
+}
+function canWriteBackupFile() {
+  if(!backupsReady||backupNeedsRecovery||storageIssue){toast('Hãy hoàn tất kiểm tra hoặc khôi phục sổ trong Cài đặt trước khi cập nhật file sao lưu.',true);return false;}
+  return true;
+}
+
+async function showBackupHistory() {
+  const revision = dialogRevision;
+  const entries = await backups.listSnapshots();
+  if (dialogRevision!==revision || formDirty) return;
+  openModal('Lịch sử phục hồi', `<p class="modal-intro">Mỗi bản chứa toàn bộ sổ tại thời điểm lưu. Khôi phục sẽ thay sổ hiện tại sau khi bạn xác nhận.</p>${entries.length?`<div class="backup-history-list">${entries.map(entry=>`<article class="backup-history-item"><div><strong>${backupTime(entry.savedAt)}</strong><p>${esc(entry.reason)}</p><p class="helper-text">${entry.transactions} giao dịch · ${entry.accounts} ví · ${entry.goals} mục tiêu</p></div><div class="settings-actions"><button class="btn secondary small" data-action="download-snapshot" data-id="${esc(entry.id)}">Tải JSON</button><button class="btn secondary small" data-action="restore-snapshot" data-id="${esc(entry.id)}">Khôi phục</button></div></article>`).join('')}</div>`:'<p>Chưa có lịch sử phục hồi hợp lệ.</p>'}`);
+}
+
+async function useSnapshot(id, restore = false) {
+  const revision = dialogRevision;
+  try {
+    const entry = await backups.getSnapshot(id);
+    if (!entry) throw new Error('Không còn bản phục hồi này. Hãy mở lại lịch sử.');
+    if (dialogRevision!==revision || formDirty) return;
+    if (!restore) {
+      download(JSON.stringify(entry.state,null,2),`money-management-history-${entry.savedAt.replace(/[:.]/g,'-')}.json`,'application/json;charset=utf-8');
+      toast('Đã yêu cầu tải JSON. Kiểm tra mục tải xuống.'); return;
+    }
+    confirmModal('Khôi phục bản đã chọn?',`<p>Bản lúc <strong>${backupTime(entry.savedAt)}</strong> có <strong>${entry.state.transactions.length} giao dịch</strong> và <strong>${entry.state.accounts.length} ví</strong>.</p><p>Sổ hiện tại sẽ được thay thế. Bạn có thể tải bản sao hiện tại trước khi tiếp tục.</p>`,()=>{
+      if (commit(entry.state,{replace:true,reason:'Khôi phục từ lịch sử'})) {closeModal(true);resetFilters();render();toast('Đã khôi phục sổ.');}
+    },'Khôi phục sổ',true);
+  } catch(error) {toast(error.message,true);}
+}
+
+async function shareBackup() {
+  if (corruptRaw!==null) {backup();return;}
+  const file = new File([JSON.stringify(state,null,2)],`money-management-backup-${localDate()}.json`,{type:'application/json'});
+  if (!navigator.share || !navigator.canShare?.({files:[file]})) {backup();return;}
+  try {
+    await navigator.share({files:[file],title:'Bản sao Money Management'});
+    ledger.markBackup();
+    toast('Đã chuyển bản sao tới lựa chọn của bạn. Hãy kiểm tra nơi lưu.');
+  } catch(error) {if(error?.name!=='AbortError')toast('Chưa chia sẻ được bản sao. Bạn có thể dùng nút Tải bản sao JSON.',true);}
+}
+
 function renderSettings() {
   const recovery = ledger.getRecovery();
   const lastBackup = ledger.lastBackupAt();
   return `${pageHeader('Cài đặt & dữ liệu','Thông tin cá nhân, sao lưu và khôi phục sổ.')}
   <div class="settings-grid">
+    <section class="card settings-section backup-settings"><div class="card-header"><h2 class="card-title">Sao lưu tự động</h2></div><div class="card-body" id="automatic-backup-content">${autoBackupMarkup()}</div></section>
+    ${renderPwaSettings()}
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Giao diện</h2></div><div class="card-body"><div class="form-group"><label for="theme-preference">Chế độ hiển thị</label><select id="theme-preference" class="form-control">${[['system','Theo hệ thống'],['light','Sáng'],['dark','Tối']].map(([value,label])=>`<option value="${value}" ${getThemePreference()===value?'selected':''}>${label}</option>`).join('')}</select></div><p class="helper-text">Lựa chọn được nhớ trên trình duyệt này. Bạn cũng có thể đổi nhanh bằng nút ở góc trên.</p></div></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Thông tin cá nhân</h2></div><form id="profile-form" class="card-body"><div class="form-group"><label for="profile-name">Tên hiển thị</label><input id="profile-name" class="form-control" name="name" value="${esc(profileDraft ?? state.profile.name)}" required maxlength="60"></div><div class="form-group"><label for="currency">Đơn vị tiền tệ</label><input id="currency" class="form-control" value="Việt Nam đồng (VND)" disabled></div><button class="btn primary" type="submit">Lưu thay đổi</button><button class="btn ghost" type="button" data-action="discard-profile-draft">Hủy sửa tên</button></form></section>
-    <section class="card settings-section"><div class="card-header"><h2 class="card-title">Sao lưu & khôi phục</h2></div><div class="card-body"><p>Sổ được lưu trên trình duyệt này. Tải bản sao JSON để giữ dữ liệu khi đổi thiết bị, đổi địa chỉ website hoặc xóa dữ liệu duyệt web.</p><div class="backup-status"><span>Lần xuất gần nhất</span><strong>${timestampLabel(lastBackup)}</strong></div><div class="settings-actions"><button class="btn secondary" data-action="backup">${icon('download')}${corruptRaw!==null?'Tải dữ liệu gốc bị lỗi':'Tải bản sao JSON'}</button><button class="btn secondary" data-action="import">${icon('upload')}Nhập bản sao JSON</button></div><input id="import-file" type="file" accept=".json,application/json" hidden><p class="helper-text">Nhập bản sao sẽ thay thế sổ hiện tại sau khi xác nhận. Hỗ trợ cả bản sao từ phiên bản cũ.</p>${corruptRaw!==null?`<p class="helper-text">Sổ đang hiển thị có ${state.transactions.length} giao dịch. JSON của sổ này không chứa dữ liệu gốc bị lỗi.</p><button class="btn secondary" data-action="backup-visible">Tải sổ đang hiển thị (JSON)</button>`:''}</div></section>
+    <section class="card settings-section"><div class="card-header"><h2 class="card-title">Sao lưu & khôi phục</h2></div><div class="card-body"><p>Sổ được lưu trên trình duyệt này. Tải bản sao JSON để giữ dữ liệu khi đổi thiết bị, đổi địa chỉ website hoặc xóa dữ liệu duyệt web.</p><div class="backup-status"><span>Lần xuất gần nhất</span><strong>${timestampLabel(lastBackup)}</strong></div><div class="settings-actions"><button class="btn secondary" data-action="backup">${icon('download')}${corruptRaw!==null?'Tải dữ liệu gốc bị lỗi':'Tải bản sao JSON'}</button><button class="btn secondary" data-action="share-backup">${icon('upload')}Lưu / chia sẻ bản sao</button><button class="btn secondary" data-action="import">${icon('upload')}Nhập bản sao JSON</button></div><input id="import-file" type="file" accept=".json,application/json" hidden><p class="helper-text">Nhập bản sao sẽ thay thế sổ hiện tại sau khi xác nhận. Hỗ trợ cả bản sao từ phiên bản cũ.</p>${corruptRaw!==null?`<p class="helper-text">Sổ đang hiển thị có ${state.transactions.length} giao dịch. JSON của sổ này không chứa dữ liệu gốc bị lỗi.</p><button class="btn secondary" data-action="backup-visible">Tải sổ đang hiển thị (JSON)</button>`:''}</div></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Bản phục hồi trên thiết bị</h2></div><div class="card-body"><p>App giữ một trạng thái hợp lệ trước lần lưu gần nhất, để khôi phục khi sửa hoặc xóa nhầm.</p>${recovery?`<div class="backup-status"><span>${timestampLabel(recovery.savedAt)}</span><strong>${recovery.state.transactions.length} giao dịch · ${recovery.state.accounts.length} ví</strong></div><div class="settings-actions"><button class="btn secondary" data-action="download-recovery">${icon('download')}Tải bản phục hồi</button><button class="btn secondary" data-action="restore-recovery">Khôi phục trạng thái này</button></div>`:'<p class="helper-text">Chưa có bản phục hồi. App sẽ tạo bản này khi bạn lưu thay đổi.</p>'}<p class="helper-text">Bản này nằm cùng trình duyệt với sổ, nên không thay thế bản sao JSON bạn tải về.</p></div></section>
-    <section class="card settings-section"><div class="card-header"><h2 class="card-title">Quản lý sổ</h2></div><div class="card-body"><div class="settings-counts"><div><strong>${state.transactions.length}</strong><span>Giao dịch</span></div><div><strong>${state.accounts.length}</strong><span>Ví</span></div><div><strong>${state.goals.length}</strong><span>Mục tiêu</span></div></div><p class="helper-text">${state.demo?'Sổ đang chứa dữ liệu mẫu.':'Sổ cá nhân.'} Chưa đồng bộ giữa các thiết bị. Dữ liệu trên thiết bị không được mã hóa; app không kết nối ngân hàng.</p><div class="settings-actions"><button class="btn danger" data-action="start-fresh">Xóa dữ liệu, tạo sổ mới</button><button class="btn ghost" data-action="load-demo">Nạp dữ liệu mẫu</button></div><p class="helper-text">Money Management · Phiên bản 1.2.0</p></div></section>
+    <section class="card settings-section"><div class="card-header"><h2 class="card-title">Quản lý sổ</h2></div><div class="card-body"><div class="settings-counts"><div><strong>${state.transactions.length}</strong><span>Giao dịch</span></div><div><strong>${state.accounts.length}</strong><span>Ví</span></div><div><strong>${state.goals.length}</strong><span>Mục tiêu</span></div></div><p class="helper-text">${state.demo?'Sổ đang chứa dữ liệu mẫu.':'Sổ cá nhân.'} Chưa đồng bộ giữa các thiết bị. Dữ liệu trên thiết bị không được mã hóa; app không kết nối ngân hàng.</p><div class="settings-actions"><button class="btn danger" data-action="start-fresh">Xóa dữ liệu, tạo sổ mới</button><button class="btn ghost" data-action="load-demo">Nạp dữ liệu mẫu</button></div><p class="helper-text">Money Management · Phiên bản 1.3.0</p></div></section>
   </div>`;
 }
 
 let modalAction = null;
 function openModal(title, content) {
+  if (ui.menu) setMenu(false);
+  dialogRevision++;
   lastFocus = document.activeElement;
   formDirty = false;
   $('#modal-root').innerHTML = `<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-header"><h2 id="modal-title">${esc(title)}</h2><button class="icon-btn modal-close" data-action="close-modal" aria-label="Đóng hộp thoại">${icon('close')}</button></div><div class="modal-body">${content}</div></section></div>`;
@@ -343,6 +491,7 @@ function openModal(title, content) {
 }
 function closeModal(force = false) {
   if (formDirty && !force && !window.confirm('Bỏ các thay đổi chưa lưu?')) return;
+  dialogRevision++;
   $('#modal-root').innerHTML=''; $('#app').inert=false;document.body.style.overflow=''; modalAction=null;formDirty=false;
   if (pendingStorageRefresh) applyStorageRefresh(true);
   if(lastFocus?.isConnected) lastFocus.focus(); else $('.page-title')?.focus();
@@ -352,7 +501,26 @@ function field(name,label,value='',options={}) {
   const {type='text',required=true,min,max,maxlength,helper,span=false}=options;
   return `<div class="form-group ${span?'span-2':''}"><label for="field-${name}">${label}</label><input class="form-control" id="field-${name}" name="${name}" type="${type}" value="${esc(value)}" ${required?'required':''} ${min!==undefined?`min="${min}"`:''} ${max!==undefined?`max="${max}"`:''} ${maxlength?`maxlength="${maxlength}"`:''} ${type==='number'?'step="1" inputmode="numeric"':''}>${helper?`<p class="helper-text">${helper}</p>`:''}</div>`;
 }
-function moneyField(name,label,value='',options={}) { return field(name,label,value,{type:'number',min:1,max:1000000000000,...options}); }
+function moneyField(name,label,value='',options={}) {
+  const {min=1,max=1000000000000,helper='Nhập số tiền nguyên, ví dụ 85000 hoặc 85.000.',span=false}=options;
+  return `<div class="form-group ${span?'span-2':''}"><label for="field-${name}">${label}</label><input class="form-control" id="field-${name}" name="${name}" type="text" inputmode="numeric" data-money-input data-min="${min}" data-max="${max}" value="${esc(formatVndInput(value))}" maxlength="32" required autocomplete="off">${helper?`<p class="helper-text">${helper}</p>`:''}</div>`;
+}
+function validateMoneyInput(input) {
+  try { parseVndAmount(input.value,{min:Number(input.dataset.min),max:Number(input.dataset.max)}); input.setCustomValidity(''); return true; }
+  catch(error) { input.setCustomValidity(error.message); return false; }
+}
+function refreshDraftChoices() {
+  const form=$('.modal form');if(!form)return;
+  const type=form.elements.type?.value||state.recurring.find(r=>r.id===form.dataset.id)?.type||'expense';
+  const replaceOptions=(name,options,label)=>{
+    const select=form.elements[name];if(!select||select.tagName!=='SELECT')return;
+    const value=select.value, exists=options.some(([id])=>id===value);
+    select.innerHTML=`${exists?'':`<option value="" disabled selected>${label}</option>`}${options.map(([id,text])=>`<option value="${esc(id)}" ${id===value?'selected':''}>${esc(text)}</option>`).join('')}`;
+  };
+  replaceOptions('accountId',state.accounts.map(a=>[a.id,a.name]),'Chọn lại ví');
+  replaceOptions('transferToAccountId',state.accounts.filter(a=>a.id!==form.elements.accountId?.value).map(a=>[a.id,a.name]),'Chọn lại ví nhận');
+  replaceOptions('categoryId',getCategories(state).filter(c=>c.type===type).map(c=>[c.id,c.name]),'Chọn lại danh mục');
+}
 function selectField(name,label,options,value) {return `<div class="form-group"><label for="field-${name}">${label}</label><select class="form-control" id="field-${name}" name="${name}" required>${options.map(([v,l])=>`<option value="${esc(v)}" ${v===value?'selected':''}>${esc(l)}</option>`).join('')}</select></div>`;}
 const colors=[['#13705c','Xanh ngọc'],['#6b78a4','Tím xám'],['#ad7542','Nâu cam'],['#4c7b9d','Xanh dương'],['#9d647b','Hồng'],['#84705a','Nâu']];
 
@@ -373,7 +541,7 @@ function transactionModal(id, desiredType='expense') {
   const type = transaction?.type || desiredType;
   if (type === 'transfer' && state.accounts.length < 2) { toast('Thêm ít nhất hai ví để ghi nhận chuyển tiền.', true); return; }
   const date = ui.month === monthKey(localDate()) ? localDate() : `${ui.month}-01`;
-  openModal(transaction?'Sửa giao dịch':'Thêm giao dịch',`<form id="transaction-form" data-id="${transaction?.id || ''}"><input type="hidden" name="type" value="${type}"><div class="segmented transaction-type" aria-label="Loại giao dịch">${[['expense','Chi tiêu'],['income','Thu nhập'],['transfer','Chuyển ví']].map(([value,label])=>`<button type="button" data-action="transaction-kind" data-type="${value}" class="${type===value?'active':''}" aria-pressed="${type===value}" ${value==='transfer'&&state.accounts.length<2?'disabled title="Cần ít nhất hai ví"':''}>${label}</button>`).join('')}</div><div class="form-grid">${moneyField('amount','Số tiền (VND)',transaction?.amount || '',{span:true,helper:'Nhập số nguyên, ví dụ 85000 cho 85.000 ₫.'})}<div id="transaction-routing" class="form-grid span-2">${transactionRouting(type,transaction)}</div><p id="transfer-note" class="helper-text span-2" ${type==='transfer'?'':'hidden'}>Chỉ ghi nhận việc chuyển tiền đã thực hiện. Không tính khoản này vào thu nhập hay chi tiêu.</p>${field('date','Ngày giao dịch',transaction?.date || date,{type:'date',min:'1900-01-01',max:'9999-12-31'})}${field('note','Ghi chú',transaction?.note || '',{required:false,maxlength:2000,helper:'Ví dụ: Ăn trưa, tiền lương hoặc rút tiền mặt.'})}</div>${formFooter(transaction?'Lưu thay đổi':'Lưu giao dịch')}</form>`);
+  openModal(transaction?'Sửa giao dịch':'Thêm giao dịch',`<form id="transaction-form" data-id="${transaction?.id || ''}"><input type="hidden" name="type" value="${type}"><div class="segmented transaction-type" aria-label="Loại giao dịch">${[['expense','Chi tiêu'],['income','Thu nhập'],['transfer','Chuyển ví']].map(([value,label])=>`<button type="button" data-action="transaction-kind" data-type="${value}" class="${type===value?'active':''}" aria-pressed="${type===value}" ${value==='transfer'&&state.accounts.length<2?'disabled title="Cần ít nhất hai ví"':''}>${label}</button>`).join('')}</div><div class="form-grid">${moneyField('amount','Số tiền (VND)',transaction?.amount || '',{span:true,helper:'Nhập 85000 hoặc 85.000 đều được hiểu là 85.000 ₫.'})}<div id="transaction-routing" class="form-grid span-2">${transactionRouting(type,transaction)}</div><p id="transfer-note" class="helper-text span-2" ${type==='transfer'?'':'hidden'}>Chỉ ghi nhận việc chuyển tiền đã thực hiện. Không tính khoản này vào thu nhập hay chi tiêu.</p>${field('date','Ngày giao dịch',transaction?.date || date,{type:'date',min:'1900-01-01',max:'9999-12-31'})}${field('note','Ghi chú',transaction?.note || '',{required:false,maxlength:2000,helper:'Ví dụ: Ăn trưa, tiền lương hoặc rút tiền mặt.'})}</div>${formFooter(transaction?'Lưu thay đổi':'Lưu giao dịch')}</form>`);
   requestAnimationFrame(() => $('#field-amount')?.focus());
 }
 
@@ -410,7 +578,7 @@ function removeRecord(kind,id) {
   if(kind==='customCategories'&&(state.transactions.some(t=>t.categoryId===id)||state.budgets.some(b=>b.categoryId===id)||state.recurring.some(r=>r.categoryId===id))){toast('Danh mục đang được sử dụng. Hãy chuyển các giao dịch, ngân sách và khoản định kỳ sang danh mục khác trước khi xóa.',true);return;}
   const names={transactions:'giao dịch',budgets:'ngân sách',goals:'mục tiêu',accounts:'ví',customCategories:'danh mục',recurring:'khoản định kỳ'};
   const label=record.name||record.note||category(record.categoryId)?.name||names[kind];
-  confirmModal(`Xóa ${names[kind]}?`,`<p>Bạn muốn xóa <strong>${esc(label)}</strong>?</p><p>${kind==='transactions'?'Số dư ví, ngân sách và báo cáo sẽ được cập nhật ngay.':'Các giao dịch đã ghi vẫn được giữ.'}</p>`,()=>{const next=clone();next[kind]=next[kind].filter(x=>x.id!==id);if(commit(next)){closeModal();toast(`Đã xóa ${names[kind]}.`);}},'Xóa');
+  confirmModal(`Xóa ${names[kind]}?`,`<p>Bạn muốn xóa <strong>${esc(label)}</strong>?</p><p>${kind==='transactions'?'Số dư ví, ngân sách và báo cáo sẽ được cập nhật ngay.':'Các giao dịch đã ghi vẫn được giữ.'}</p>`,()=>{const next=clone();next[kind]=next[kind].filter(x=>x.id!==id);if(commit(next,{reason:`Xóa ${names[kind]}`})){closeModal();toast(`Đã xóa ${names[kind]}.`);}},'Xóa');
 }
 
 function download(content,name,type) {
@@ -432,20 +600,23 @@ function restoreRecovery() {
   const recovery = ledger.getRecovery();
   if (!recovery) { toast('Không có bản phục hồi hợp lệ.', true); return; }
   confirmModal('Khôi phục trạng thái trước?',`<p>Bản phục hồi lúc <strong>${timestampLabel(recovery.savedAt)}</strong> có <strong>${recovery.state.transactions.length} giao dịch</strong>.</p><p>Sổ hiện tại sẽ được thay thế bằng trạng thái này.</p>`,()=>{
-    if (commit(recovery.state,{replace:true})) { closeModal(true); resetFilters(); render(); toast('Đã khôi phục trạng thái trước.'); }
+    if (commit(recovery.state,{replace:true,reason:'Khôi phục trạng thái trước'})) { closeModal(true); resetFilters(); render(); toast('Đã khôi phục trạng thái trước.'); }
   },'Khôi phục',true);
 }
 async function readImport(file) {
   if(!file)return;
   if(file.size>15*1024*1024){toast('Tệp lớn hơn 15 MB. Hãy chọn một bản sao lưu Money Management phù hợp.',true);return;}
+  const request=++importRequest, revision=dialogRevision;
   try {
     const imported=validateState(JSON.parse((await file.text()).replace(/^\uFEFF/,'')));
-    confirmModal('Khôi phục sổ từ bản sao lưu?',`<p>Bản sao có <strong>${imported.transactions.length} giao dịch</strong>, <strong>${imported.accounts.length} ví</strong> và <strong>${imported.goals.length} mục tiêu</strong>, <strong>${imported.customCategories.length} danh mục tự tạo</strong> và <strong>${imported.recurring.length} khoản định kỳ</strong>.</p><p>Sổ hiện tại sẽ được thay thế hoàn toàn. Bạn có thể tải bản sao hiện tại trước khi tiếp tục.</p>`,()=>{if(commit(imported,{replace:true})){closeModal();resetFilters();render();toast('Đã khôi phục dữ liệu thành công.');}},'Khôi phục dữ liệu',true);
+    if(request!==importRequest)return;
+    if(dialogRevision!==revision||formDirty){toast('Bạn đang thao tác ở biểu mẫu khác. Hãy hoàn tất hoặc đóng biểu mẫu rồi chọn lại file JSON.',true);return;}
+    confirmModal('Khôi phục sổ từ bản sao lưu?',`<p>Bản sao có <strong>${imported.transactions.length} giao dịch</strong>, <strong>${imported.accounts.length} ví</strong> và <strong>${imported.goals.length} mục tiêu</strong>, <strong>${imported.customCategories.length} danh mục tự tạo</strong> và <strong>${imported.recurring.length} khoản định kỳ</strong>.</p><p>Sổ hiện tại sẽ được thay thế hoàn toàn. Bạn có thể tải bản sao hiện tại trước khi tiếp tục.</p>`,()=>{if(commit(imported,{replace:true,reason:'Nhập bản sao JSON'})){closeModal();resetFilters();render();toast('Đã khôi phục dữ liệu thành công.');}},'Khôi phục dữ liệu',true);
   } catch(error) {toast(`Không thể nhập bản sao: ${error.message||'Tệp JSON không hợp lệ.'}`,true);}
 }
 
 function freshBook(demo=false) {
-  confirmModal(demo?'Nạp dữ liệu minh họa?':'Bắt đầu một sổ mới?',`<p>${demo?'Thay sổ hiện tại bằng một bộ thu chi minh họa để khám phá app.':'Xóa sổ hiện tại, gồm ví, giao dịch, ngân sách, mục tiêu, danh mục tự tạo và khoản định kỳ.'}</p><p>Hãy tải bản sao nếu bạn muốn giữ lại dữ liệu đang có.</p>`,()=>{const next=demo?createDemoState():createEmptyState();next.profile={...state.profile};if(commit(next,{replace:true})){closeModal();ui.month=monthKey(localDate());resetFilters();location.hash=demo?'overview':'wallets';render();toast(demo?'Đã nạp dữ liệu mẫu.':'Đã tạo sổ mới. Nhập số dư ban đầu tại mục Ví của tôi.');}},demo?'Nạp dữ liệu mẫu':'Bắt đầu sổ mới',true);
+  confirmModal(demo?'Nạp dữ liệu minh họa?':'Bắt đầu một sổ mới?',`<p>${demo?'Thay sổ hiện tại bằng một bộ thu chi minh họa để khám phá app.':'Xóa sổ hiện tại, gồm ví, giao dịch, ngân sách, mục tiêu, danh mục tự tạo và khoản định kỳ.'}</p><p>Hãy tải bản sao nếu bạn muốn giữ lại dữ liệu đang có.</p>`,()=>{const next=demo?createDemoState():createEmptyState();next.profile={...state.profile};if(commit(next,{replace:true,reason:demo?'Nạp dữ liệu mẫu':'Tạo sổ mới'})){closeModal();ui.month=monthKey(localDate());resetFilters();location.hash=demo?'overview':'wallets';render();toast(demo?'Đã nạp dữ liệu mẫu.':'Đã tạo sổ mới. Nhập số dư ban đầu tại mục Ví của tôi.');}},demo?'Nạp dữ liệu mẫu':'Bắt đầu sổ mới',true);
 }
 
 function preserveRender() {
@@ -454,13 +625,18 @@ function preserveRender() {
   if(id){const fresh=document.getElementById(id);if(fresh){fresh.focus();if(start!=null&&fresh.setSelectionRange)try{fresh.setSelectionRange(start,end);}catch{}}}
 }
 function resetFilters() { ui.query='';ui.type='all';ui.categoryId='all';ui.accountId='all';ui.allMonths=false;ui.customRange=false;ui.startDate='';ui.endDate='';ui.page=1; }
+function setMenu(open) {
+  ui.menu=Boolean(open&&mobileNavigation.matches); render();
+  const target=ui.menu?$('.sidebar-close'):$('[data-action="open-menu"]');
+  target?.focus({preventScroll:true});
+}
 function handleAction(event) {
   const button=event.target.closest('[data-action]');if(!button)return;
   const action=button.dataset.action,id=button.dataset.id;
   if(action==='backdrop'){if(event.target===button)closeModal();return;}
   const actions={
     'toggle-theme':()=>{const result=setThemePreference(getResolvedTheme()==='dark'?'light':'dark');if(!result.persisted)toast('Đã đổi giao diện cho phiên này. Trình duyệt chưa cho lưu lựa chọn.',true);},
-    'open-menu':()=>{ui.menu=true;render();},'close-menu':()=>{ui.menu=false;render();},
+    'open-menu':()=>setMenu(true),'close-menu':()=>setMenu(false),
     'month-prev':()=>{if(ui.month>'1900-01'){ui.month=shiftMonth(ui.month,-1);ui.page=1;render();}},
     'month-next':()=>{if(ui.month<'9999-12'){ui.month=shiftMonth(ui.month,1);ui.page=1;render();}},
     'chart-cumulative':()=>{ui.chartMode='cumulative';render();},'chart-daily':()=>{ui.chartMode='daily';render();},
@@ -475,6 +651,15 @@ function handleAction(event) {
     'page-prev':()=>{ui.page=Math.max(1,ui.page-1);render();},'page-next':()=>{ui.page++;render();},
     'reset-filters':()=>{resetFilters();render();},
     'close-modal':closeModal,'confirm-action':()=>modalAction?.(),'backup':backup,
+    'share-backup':shareBackup,
+    'choose-backup-file':()=>{if(canWriteBackupFile())backupTask(backups.chooseFile(state),'Đã liên kết file sao lưu. App sẽ cập nhật file sau mỗi lần lưu.');},
+    'resume-backup-file':()=>{if(canWriteBackupFile())backupTask(backups.resumeFilePermission(state),'Đã cập nhật file sao lưu.');},
+    'disconnect-backup-file':()=>backupTask(backups.disconnectFile(),'Đã ngừng liên kết. File đã lưu vẫn nằm ở nơi bạn chọn.'),
+    'backup-history':()=>showBackupHistory().catch(error=>toast(error.message,true)),
+    'download-snapshot':()=>useSnapshot(id),
+    'restore-snapshot':()=>useSnapshot(id,true),
+    'persist-storage':()=>backups.requestPersistence().then(()=>toast(backups.getStatus().persistence==='granted'?'Trình duyệt đã ưu tiên giữ dữ liệu trên thiết bị.':'Trình duyệt chưa cấp ưu tiên. Hãy giữ thêm file sao lưu riêng.')).catch(error=>toast(error.message,true)),
+    'continue-empty':()=>confirmModal('Dùng sổ trống?', '<p>Lịch sử cũ vẫn được giữ trong giới hạn 30 bản. Những thay đổi mới sẽ tạo lịch sử mới và có thể thay nội dung file sao lưu đang liên kết.</p>',()=>{backupNeedsRecovery=false;closeModal(true);render();toast('Bạn có thể bắt đầu ghi vào sổ trống.');},'Dùng sổ trống'),
     'backup-visible':()=>{download(JSON.stringify(state,null,2),`money-management-visible-book-${localDate()}.json`,'application/json;charset=utf-8');toast(`Đã tạo JSON của sổ đang hiển thị (${state.transactions.length} giao dịch), không bao gồm dữ liệu gốc bị lỗi.`);},
     'discard-profile-draft':()=>{profileDraft=null;render();},
     'import':()=>$('#import-file')?.click(),
@@ -499,6 +684,7 @@ function handleAction(event) {
 
 document.addEventListener('click',handleAction);
 document.addEventListener('click',event=>{
+  if(ui.menu&&event.target.closest('.sidebar a[href^="#"]'))setMenu(false);
   if(event.target.closest('.skip-link')) {
     event.preventDefault();
     const main=$('#main-content'); main?.setAttribute('tabindex','-1'); main?.focus(); main?.scrollIntoView({block:'start'});
@@ -507,13 +693,22 @@ document.addEventListener('click',event=>{
 document.addEventListener('input',event=>{
   if(event.target.closest('.modal form')) formDirty=true;
   if(event.target.id==='profile-name') profileDraft=event.target.value;
+  if(event.target.matches('[data-money-input]')&&!event.isComposing)validateMoneyInput(event.target);
+  if(event.target.id==='transaction-search'&&!event.isComposing){ui.query=event.target.value;ui.page=1;preserveRender();}
+});
+document.addEventListener('compositionend',event=>{
+  if(event.target.matches('[data-money-input]'))validateMoneyInput(event.target);
   if(event.target.id==='transaction-search'){ui.query=event.target.value;ui.page=1;preserveRender();}
+});
+document.addEventListener('focusout',event=>{
+  if(event.target.matches('[data-money-input]')&&validateMoneyInput(event.target))event.target.value=formatVndInput(event.target.value);
 });
 document.addEventListener('change',event=>{
   const el=event.target;
   if(el.closest('.modal form')) formDirty=true;
   if(el.id==='profile-name') profileDraft=el.value;
   if(el.id==='theme-preference') {const result=setThemePreference(el.value);if(!result.persisted)toast('Đã đổi giao diện cho phiên này. Trình duyệt chưa cho lưu lựa chọn.',true);}
+  else if(el.id==='auto-download-backup') {const enabled=el.checked;backupTask(backups.setDownloadMode(enabled),enabled?'Đã bật yêu cầu tải JSON sau mỗi lần lưu. Hãy cho phép tải nhiều file nếu trình duyệt hỏi.':'Đã tắt tải tự động. Lịch sử trên thiết bị vẫn được tạo.');}
   else if(el.id==='selected-month') {if(el.validity.valid&&/^\d{4}-\d{2}$/.test(el.value)){ui.month=el.value;ui.page=1;render();}}
   else if(el.dataset.filter){ui[el.dataset.filter]=el.value;ui.page=1;render();}
   else if(el.id==='filter-period') {ui.customRange=el.value==='range';ui.allMonths=el.value==='all';if(ui.customRange){ui.startDate=ui.startDate||`${ui.month}-01`;ui.endDate=ui.endDate||`${ui.month}-${String(daysInMonth(ui.month)).padStart(2,'0')}`;}ui.page=1;render();}
@@ -524,8 +719,9 @@ document.addEventListener('change',event=>{
 });
 document.addEventListener('submit',event=>{
   const form=event.target;if(!['transaction-form','budget-form','goal-form','wallet-form','contribute-form','profile-form','category-form','recurring-form','recurring-post-form'].includes(form.id))return;
-  event.preventDefault();if(!form.reportValidity())return;
+  event.preventDefault();form.querySelectorAll('[data-money-input]').forEach(validateMoneyInput);if(!form.reportValidity())return;
   const data=Object.fromEntries(new FormData(form)),id=form.dataset.id;let next=clone(),message='Đã lưu thay đổi.';
+  const readAmount=name=>parseVndAmount(data[name],{min:Number(form.elements[name].dataset.min),max:Number(form.elements[name].dataset.max)});
   try {
     const editCollection={'transaction-form':'transactions','budget-form':'budgets','goal-form':'goals','wallet-form':'accounts','category-form':'customCategories','recurring-form':'recurring'}[form.id];
     if(id&&editCollection&&!next[editCollection].some(record=>record.id===id)) throw new Error('Mục này đã bị xóa ở tab khác. Hãy đóng biểu mẫu và tải lại danh sách.');
@@ -538,47 +734,56 @@ document.addEventListener('submit',event=>{
     if(form.id==='recurring-form') {
       const previous=next.recurring.find(r=>r.id===id);
       const preserveAnchor=previous&&previous.nextDate===data.nextDate&&previous.frequency===data.frequency;
-      const record={id:id||uid(),type:data.type,amount:Number(data.amount),categoryId:data.categoryId,accountId:data.accountId,note:data.note.trim(),frequency:data.frequency,nextDate:data.nextDate,anchorDay:preserveAnchor?previous.anchorDay:Number(data.nextDate.slice(8)),anchorMonth:preserveAnchor?previous.anchorMonth:Number(data.nextDate.slice(5,7)),active:data.active==='on'};
+      const record={id:id||uid(),type:data.type,amount:readAmount('amount'),categoryId:data.categoryId,accountId:data.accountId,note:data.note.trim(),frequency:data.frequency,nextDate:data.nextDate,anchorDay:preserveAnchor?previous.anchorDay:Number(data.nextDate.slice(8)),anchorMonth:preserveAnchor?previous.anchorMonth:Number(data.nextDate.slice(5,7)),active:data.active==='on'};
       if(id)next.recurring=next.recurring.map(r=>r.id===id?record:r);else next.recurring.push(record);
       message=id?'Đã cập nhật khoản định kỳ.':'Đã tạo lịch. Chưa có giao dịch nào được ghi.';
     }
     if(form.id==='recurring-post-form') {
-      next=createRecurringTransaction(state,id,form.dataset.expectedDate,{date:data.date,amount:Number(data.amount),categoryId:data.categoryId,accountId:data.accountId,note:data.note.trim()});
+      next=createRecurringTransaction(state,id,form.dataset.expectedDate,{date:data.date,amount:readAmount('amount'),categoryId:data.categoryId,accountId:data.accountId,note:data.note.trim()});
       message='Đã ghi giao dịch và chuyển lịch sang kỳ tiếp theo.';
     }
     if(form.id==='transaction-form') {
-      const record={id:id||uid(),type:data.type,amount:Number(data.amount),date:data.date,categoryId:data.categoryId,accountId:data.accountId,note:data.note.trim(),createdAt:state.transactions.find(t=>t.id===id)?.createdAt||new Date().toISOString()};
+      const record={id:id||uid(),type:data.type,amount:readAmount('amount'),date:data.date,categoryId:data.categoryId,accountId:data.accountId,note:data.note.trim(),createdAt:state.transactions.find(t=>t.id===id)?.createdAt||new Date().toISOString()};
       if(data.type==='transfer') record.transferToAccountId=data.transferToAccountId;
       if(id) next.transactions=next.transactions.map(t=>t.id===id?record:t);else next.transactions.push(record);
       message=id?'Đã cập nhật giao dịch.':'Đã lưu giao dịch mới.';
     }
     if(form.id==='budget-form') {
       if(next.budgets.some(b=>b.month===data.month&&b.categoryId===data.categoryId&&b.id!==id))throw new Error('Danh mục này đã có ngân sách trong tháng. Hãy sửa ngân sách hiện có.');
-      const record={id:id||uid(),month:data.month,categoryId:data.categoryId,amount:Number(data.amount)};
+      const record={id:id||uid(),month:data.month,categoryId:data.categoryId,amount:readAmount('amount')};
       if(id)next.budgets=next.budgets.map(b=>b.id===id?record:b);else next.budgets.push(record);
       message=id?'Đã cập nhật ngân sách.':'Đã tạo ngân sách mới.';
     }
     if(form.id==='goal-form') {
-      const record={id:id||uid(),name:data.name.trim(),target:Number(data.target),saved:Number(data.saved),deadline:data.deadline,icon:data.icon,color:data.color};
+      const record={id:id||uid(),name:data.name.trim(),target:readAmount('target'),saved:readAmount('saved'),deadline:data.deadline,icon:data.icon,color:data.color};
       if(id)next.goals=next.goals.map(g=>g.id===id?record:g);else next.goals.push(record);
       message=id?'Đã cập nhật mục tiêu.':'Đã tạo mục tiêu.';
     }
     if(form.id==='wallet-form') {
-      const record={id:id||uid(),name:data.name.trim(),initialBalance:Number(data.initialBalance),icon:data.icon,color:data.color};
+      const record={id:id||uid(),name:data.name.trim(),initialBalance:readAmount('initialBalance'),icon:data.icon,color:data.color};
       if(id)next.accounts=next.accounts.map(a=>a.id===id?record:a);else next.accounts.push(record);
       message=id?'Đã cập nhật ví.':'Đã thêm ví mới.';
     }
     if(form.id==='contribute-form') {
       const goal=next.goals.find(g=>g.id===id);if(!goal)throw new Error('Mục tiêu không còn tồn tại.');
-      const amount=Number(data.amount);if(!Number.isSafeInteger(amount)||amount<=0)throw new Error('Hãy nhập số tiền nguyên lớn hơn 0.');
+      const amount=readAmount('amount');if(!Number.isSafeInteger(amount)||amount<=0)throw new Error('Hãy nhập số tiền nguyên lớn hơn 0.');
       goal.saved+=amount;message='Đã cập nhật số tiền tiết kiệm.';
     }
     validateState(next);
-    if(commit(next)) { if(form.id==='profile-form')profileDraft=null;else closeModal(true); if(form.id==='transaction-form'||form.id==='recurring-post-form'){ui.month=data.date.slice(0,7);ui.page=1;} if(form.id==='budget-form')ui.month=data.month;render();toast(message); }
+    if(commit(next,{reason:message})) { if(form.id==='profile-form')profileDraft=null;else closeModal(true); if(form.id==='transaction-form'||form.id==='recurring-post-form'){ui.month=data.date.slice(0,7);ui.page=1;} if(form.id==='budget-form')ui.month=data.month;render();toast(message); }
   } catch(error) {const errorEl=$('#modal-error');if(errorEl){errorEl.textContent=error.message;errorEl.scrollIntoView({block:'nearest'});}else toast(error.message,true);}
 });
 document.addEventListener('keydown',event=>{
-  if(!$('.modal')){if(event.key==='Escape'&&ui.menu){ui.menu=false;render();}return;}
+  if(!$('.modal')){
+    if(event.key==='Escape'&&ui.menu){setMenu(false);event.preventDefault();}
+    if(event.key==='Tab'&&ui.menu&&mobileNavigation.matches){
+      const focusable=[...$('.sidebar').querySelectorAll('button:not([disabled]),a[href]')].filter(el=>el.offsetParent!==null);
+      const first=focusable[0],last=focusable.at(-1);
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
+    }
+    return;
+  }
   if(event.key==='Escape'){closeModal();event.preventDefault();}
   if(event.key==='Tab') {
     const focusable=[...$('.modal').querySelectorAll('button:not([disabled]),input:not([type="hidden"]):not([disabled]),select:not([disabled]),textarea,a[href],[tabindex="0"]')].filter(el=>el.offsetParent!==null);
@@ -593,9 +798,37 @@ window.addEventListener('storage',event=>{
   if($('.modal')) {pendingStorageRefresh=true;toast('Sổ vừa thay đổi ở tab khác. App sẽ cập nhật khi đóng hộp thoại và kiểm tra xung đột trước khi lưu.',true);return;}
   applyStorageRefresh(true);
 });
-window.addEventListener('beforeunload',event=>{if(formDirty||(profileDraft!==null&&profileDraft!==state.profile.name)){event.preventDefault();event.returnValue='';}});
+mobileNavigation.addEventListener('change',()=>{
+  if(!mobileNavigation.matches)ui.menu=false;
+  const sidebar=$('.sidebar'); if(sidebar){sidebar.inert=mobileNavigation.matches&&!ui.menu;sidebar.classList.toggle('open',ui.menu);}
+  const main=$('#main-content'); if(main)main.inert=mobileNavigation.matches&&ui.menu;
+  if(!ui.menu)$('.mobile-overlay')?.remove();
+  document.body.style.overflow=$('.modal')||(ui.menu&&mobileNavigation.matches)?'hidden':'';
+});
+window.addEventListener('beforeunload',event=>{if(!updateInProgress&&(formDirty||(profileDraft!==null&&profileDraft!==state.profile.name)||(backups.getStatus().mode==='file'&&backups.getStatus().pendingWrites))){event.preventDefault();event.returnValue='';}});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')backups.flush().catch(()=>{});});
+window.addEventListener('pagehide',()=>{backups.flush().catch(()=>{});});
 window.addEventListener('money-management:themechange',()=>{
   const selector=$('#theme-preference');if(selector)selector.value=getThemePreference();
   const toggle=$('.theme-toggle');if(toggle){const label=getResolvedTheme()==='dark'?'Bật chế độ sáng':'Bật chế độ tối';toggle.setAttribute('aria-label',label);toggle.setAttribute('title',label);toggle.innerHTML=icon(getResolvedTheme()==='dark'?'sun':'moon');}
 });
 render();
+backups.init().then(async()=>{
+  backupNeedsRecovery=primaryMissingAtBoot&&!storageIssue&&backups.getStatus().snapshotCount>0;
+  backupsReady=true;refreshBackupStatus();
+  // Opening a blank or damaged primary must never overwrite the last good file.
+  if(!primaryMissingAtBoot&&!storageIssue&&!backupNeedsRecovery)await backups.syncFile(state);
+}).catch(()=>{
+  backupsReady=true;backupNotice='Sổ có thể tiếp tục lưu trên trình duyệt. Chưa mở được sao lưu tự động; hãy tải một bản JSON trong Cài đặt.';refreshBackupStatus();
+});
+initPwa({beforeUpdate:async()=>{
+  await backups.flush();
+  if((formDirty||(profileDraft!==null&&profileDraft!==state.profile.name))&&!window.confirm('Cập nhật sẽ tải lại app. Bỏ các thay đổi chưa lưu và cập nhật?'))return false;
+  updateInProgress=true;
+  $('#app').inert=true;$('#modal-root').inert=true;
+  return true;
+}});
+window.addEventListener('money-management:pwa-change',event=>{
+  if(!event.detail?.updating){updateInProgress=false;$('#app').inert=Boolean($('.modal'));$('#modal-root').inert=false;}
+  const panel=$('#pwa-settings');if(panel)panel.outerHTML=renderPwaSettings();
+});

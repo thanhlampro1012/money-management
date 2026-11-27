@@ -1,0 +1,23 @@
+{
+  "id": "./",
+  "name": "Money Management",
+  "short_name": "Money Management",
+  "description": "Sổ thu chi cá nhân: ví, ngân sách, mục tiêu và báo cáo Excel.",
+  "lang": "vi",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f6f8",
+  "theme_color": "#13705c",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {"src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "./icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ],
+  "shortcuts": [
+    {"name": "Giao dịch", "url": "./#transactions", "description": "Xem và ghi thu chi"},
+    {"name": "Ví của tôi", "url": "./#wallets", "description": "Kiểm tra số dư các ví"}
+  ]
+}

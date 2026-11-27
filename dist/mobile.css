@@ -1,0 +1,75 @@
+/* Mobile and installed-app behavior. The main stylesheet owns the visual theme. */
+html { -webkit-text-size-adjust: 100%; }
+.sidebar-close { display: none; }
+.pwa-card-heading { display: flex; align-items: center; gap: 13px; }
+.pwa-card-heading img { width: 48px; height: 48px; flex-shrink: 0; border-radius: 11px; }
+.pwa-card-heading p { margin-top: 5px; color: var(--muted); font-size: .8125rem; line-height: 1.6; }
+.pwa-install-help { margin-top: 14px; color: var(--muted); font-size: .875rem; line-height: 1.8; }
+.pwa-install-help summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+.pwa-install-help ol { padding-left: 20px; margin: 4px 0 12px; }
+.pwa-install-help li + li { margin-top: 7px; }
+.pwa-state { margin-top: 14px; font-size: .875rem; line-height: 1.7; }
+#pwa-status-region { position: fixed; z-index: 70; right: 24px; bottom: max(18px, env(safe-area-inset-bottom)); left: calc(var(--sidebar-width) + 24px); display: flex; justify-content: flex-end; pointer-events: none; }
+.pwa-update-notice { display: flex; align-items: center; gap: 15px; width: min(100%, 700px); padding: 15px 18px; border: 1px solid var(--success-border); border-radius: 9px; background: var(--surface); color: var(--text); box-shadow: 0 4px 24px var(--shadow); pointer-events: auto; }
+.pwa-update-copy { flex: 1; font-size: .875rem; line-height: 1.6; }
+.pwa-update-copy strong { display: block; color: var(--heading); }
+.pwa-update-copy p { margin-top: 3px; color: var(--muted); }
+.pwa-update-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+body:has(.modal) #pwa-status-region, body:has(.sidebar.open) #pwa-status-region { display: none; }
+
+@media (max-width: 850px), (pointer: coarse) {
+  .btn, .btn.small, .nav-item, .segmented button, .chart-toggle button, .recurring-actions .btn, .demo-notice .btn, .action-notice .btn { min-height: 44px; }
+  .icon-btn, .row-actions .icon-btn, .topbar .theme-toggle, .month-control .icon-btn { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 10px; }
+  .form-control, .filters .form-control, .search-box input, .month-control input, .date-range input { font-size: 1rem; min-height: 44px; max-width: 100%; }
+  .form-control, .search-box { min-height: 46px; }
+  .month-control { height: 46px; }
+  .month-input-wrap { height: 44px; }
+  .nav-item { min-height: 46px; }
+  .row-actions { gap: 4px; }
+  .storage-link { min-height: 44px; }
+  .modal { scroll-padding: 80px 0 110px; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .modal input, .modal select, .modal textarea { scroll-margin: 80px 0 110px; }
+}
+
+@media (max-width: 850px) {
+  .main { padding-right: max(20px, env(safe-area-inset-right)); padding-left: max(20px, env(safe-area-inset-left)); padding-bottom: max(28px, calc(env(safe-area-inset-bottom) + 16px)); }
+  .topbar { padding-top: env(safe-area-inset-top); min-height: calc(68px + env(safe-area-inset-top)); }
+  .sidebar { max-width: calc(100vw - 44px); padding-top: max(16px, env(safe-area-inset-top)); padding-left: max(18px, env(safe-area-inset-left)); padding-bottom: max(20px, env(safe-area-inset-bottom)); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .sidebar.open { width: min(300px, calc(100vw - 44px)); }
+  .sidebar-close { display: inline-flex; align-self: flex-end; margin: -8px 0 5px; }
+  .sidebar.open .brand { margin-bottom: 24px; }
+  .sidebar-footer { margin-top: 24px; }
+  body:has(.sidebar.open) { overflow: hidden; }
+  .modal-backdrop { top: var(--app-viewport-top, 0px); bottom: auto; height: var(--app-viewport-height, 100dvh); padding-top: max(12px, env(safe-area-inset-top)); }
+  .modal { max-height: calc(var(--app-viewport-height, 100dvh) - max(24px, env(safe-area-inset-top))); }
+  .modal-header { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+  .modal-close { top: 12px; right: 12px; }
+  .modal-header h2 { padding-right: 32px; }
+  .modal-footer { position: sticky; bottom: 0; z-index: 2; }
+  #toast-region { bottom: max(18px, env(safe-area-inset-bottom)); }
+  #pwa-status-region { left: max(14px, env(safe-area-inset-left)); right: max(14px, env(safe-area-inset-right)); }
+}
+
+@media (max-width: 600px) {
+  .main { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+  .topbar { min-height: calc(66px + env(safe-area-inset-top)); gap: 8px; }
+  .topbar-actions { gap: 5px; }
+  .topbar-actions .avatar { display: none; }
+  .breadcrumb { gap: 5px; }
+  .storage-link { font-size: .8125rem; max-width: 142px; text-align: right; }
+  .page-actions { flex-wrap: wrap; }
+  .page-actions .month-control { flex: 1 1 210px; justify-content: space-between; }
+  .page-header .page-actions > .btn { flex: 1 1 140px; min-width: min(140px, 100%); white-space: normal; font-size: .875rem; }
+  .month-caption { font-size: .875rem; }
+  .settings-actions > .btn { white-space: normal; }
+  .modal-backdrop { align-items: flex-end; padding-left: 0; padding-right: 0; padding-bottom: 0; }
+  .modal { max-height: calc(var(--app-viewport-height, 100dvh) - max(12px, env(safe-area-inset-top))); }
+  .modal-body { padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
+  .modal-body .modal-footer { margin-left: calc(-1 * max(20px, env(safe-area-inset-left))); margin-right: calc(-1 * max(20px, env(safe-area-inset-right))); }
+  .modal-footer { padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
+  .pwa-update-notice { flex-wrap: wrap; padding: 14px; }
+  .pwa-update-actions { width: 100%; }
+  .pwa-update-actions > .btn { flex: 1; }
+}
+
+@media print { #pwa-status-region, .pwa-install-help, .sidebar-close { display: none !important; } }

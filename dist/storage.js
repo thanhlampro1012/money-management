@@ -117,6 +117,22 @@ export class LedgerStore {
         return this._result();
       }
 
+      // A missing primary is not proof of a new installation: a surviving
+      // recovery snapshot may be the user's only remaining ledger. Expose it
+      // without writing, then require an explicit restore/replacement. This
+      // prevents the first ordinary edit from overwriting it with an empty book.
+      const recovery = this.getRecovery();
+      if (recovery) {
+        this._state = recovery.state;
+        this._knownRaw = null;
+        this._hasSeenData = true;
+        this._hasValidState = true;
+        this._missing = true;
+        this._corruptRaw = null;
+        this._issue = 'Không tìm thấy bản lưu chính. App đang hiển thị bản phục hồi còn trên thiết bị và chưa ghi đè dữ liệu. Hãy tải JSON hoặc xác nhận khôi phục trong Cài đặt trước khi ghi tiếp.';
+        return this._result();
+      }
+
       // A fresh installation always starts with an empty personal ledger.
       const empty = validateState(createEmptyState());
       const emptyRaw = JSON.stringify(empty);

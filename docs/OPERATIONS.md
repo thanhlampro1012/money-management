@@ -1,6 +1,6 @@
-# Vận hành Money Management 1.2.0
+# Vận hành Money Management 1.3.0
 
-Tài liệu này dành cho việc sử dụng sổ cá nhân trên một trình duyệt và cho người triển khai website tĩnh. Dữ liệu nằm trên thiết bị; việc website vẫn hoạt động không đồng nghĩa đã có bản sao sổ ở máy chủ.
+Tài liệu này dành cho việc sử dụng sổ cá nhân trên máy tính/điện thoại và cho người triển khai website tĩnh. Sổ và lịch sử nằm trên thiết bị; website công khai không nhận dữ liệu tài chính và chưa có tài khoản đăng nhập hay đồng bộ cloud. Chọn cách giữ thêm file JSON riêng để có thể phục hồi ngoài dữ liệu website.
 
 Website GitHub Pages: **https://thanhlampro1012.github.io/money-management/**. Nếu đã có sổ tại địa chỉ Sites cũ, thực hiện [chuyển sổ bằng JSON](#chuyển-sổ-từ-địa-chỉ-sites-cũ-sang-github-pages) trước khi bắt đầu ghi tiếp tại địa chỉ mới.
 
@@ -13,6 +13,21 @@ Chọn một ngày bắt đầu theo dõi. Trong **Ví của tôi**, thêm các 
 Số dư ban đầu là điểm xuất phát của toàn bộ sổ, không phải số dư riêng từng tháng. Thay đổi số này sẽ điều chỉnh số dư hiện tại; nó không tạo khoản thu/chi trong báo cáo tháng. Chỉ sửa khi cần hiệu chỉnh điểm xuất phát, không dùng thao tác này để thay cho giao dịch phát sinh hằng ngày.
 
 **Nạp dữ liệu mẫu** và **Xóa dữ liệu, tạo sổ mới** đều thay thế sổ hiện tại sau xác nhận. Tải JSON trước khi dùng nếu muốn giữ sổ đang có. Dữ liệu mẫu chỉ phục vụ thử giao diện và được gắn nhãn.
+
+### Thêm app vào màn hình chính
+
+1. Nếu đã có sổ, **tải JSON từ đúng tab/app đang giữ dữ liệu trước**; kiểm tra file trong Tải xuống hoặc Tệp.
+2. Trên **iPhone/iPad**, mở website bằng Safari rồi chọn **Chia sẻ → Thêm vào Màn hình chính**. Trên **Android**, mở bằng Chrome rồi chọn **Cài đặt ứng dụng/Thêm vào màn hình chính** trong menu ⋮, hoặc dùng nút cài đặt trong app khi có.
+3. Mở biểu tượng chiếc ví màu xanh. Nếu sổ chưa hiện, nhập JSON đã xuất và đối chiếu số dư, giao dịch. Chỉ ngừng dùng bản cũ sau khi đối chiếu xong.
+4. Vào **Cài đặt & dữ liệu → Sao lưu tự động** và chọn cách sao lưu cho nơi vừa cài. Liên kết file/quyền ghi không được mang theo trong JSON.
+
+Trên iPhone, app màn hình chính có thể dùng vùng dữ liệu riêng với Safari hoặc một lần cài khác; thêm biểu tượng không tự chuyển sổ. [WebKit giải thích rằng dữ liệu cục bộ không được sao chép cùng cookies](https://webkit.org/blog/14787/webkit-features-in-safari-17-2/). **Không xóa biểu tượng/app cũ chỉ để cập nhật icon trước khi xuất và kiểm tra JSON.** Nếu phải xóa rồi thêm lại, giữ bản sao ngoài dữ liệu website và nhập lại khi cần.
+
+### Dùng khi không có mạng
+
+Mở app khi có mạng và đợi mục **Ứng dụng trên điện thoại** báo đã tải ứng dụng để dùng ngoại tuyến. Sau đó có thể mở app, xem số dư, ghi thu chi và xuất báo cáo khi không có mạng, nếu trình duyệt vẫn giữ bộ nhớ website. Lần truy cập đầu tiên và việc tải bản cập nhật cần mạng.
+
+Chế độ ngoại tuyến chỉ lưu các file mã/giao diện của app. Nó không tạo một bản tài chính trên máy chủ và không thay thế JSON hoặc lịch sử phục hồi. Việc đưa JSON vào iCloud/Drive qua ứng dụng Tệp do hệ điều hành/dịch vụ đó xử lý; Money Management không theo dõi việc đồng bộ của họ.
 
 ## 2. Ghi chép và đối chiếu số dư
 
@@ -63,11 +78,36 @@ Mỗi lần xác nhận/bỏ qua chỉ xử lý một kỳ. Nếu bỏ lỡ nhi�
 
 ## 3. Sao lưu JSON và xuất Excel
 
-Trong **Cài đặt & dữ liệu**, chọn **Tải bản sao JSON**, hoặc dùng **Sao lưu dữ liệu** ở thanh điều hướng. JSON chứa hồ sơ hiển thị, ví, giao dịch, ngân sách, mục tiêu, danh mục tự tạo và lịch định kỳ của sổ hiện tại.
+JSON chứa toàn bộ hồ sơ hiển thị, ví, giao dịch, ngân sách, mục tiêu, danh mục tự tạo và lịch định kỳ. Sau mỗi thay đổi được lưu thành công, app tự giữ lịch sử trên thiết bị. **Sao lưu ra file mặc định tắt**; trình duyệt cần bạn chọn file/cấp quyền hoặc bật tải tự động trước khi app có thể làm phần này.
 
-Sau khi xuất, kiểm tra file xuất hiện trong thư mục tải xuống và có thể đọc được. **Lần xuất gần nhất** chỉ là thời điểm app khởi tạo tải xuống; trình duyệt không báo lại cho app rằng bạn đã lưu hoặc di chuyển file thành công. Thời điểm này không nằm trong bản sao sổ và không tự chuyển sang thiết bị mới.
+### Cập nhật một file JSON sau mỗi thay đổi
 
-Một thói quen phù hợp cho sổ cá nhân là xuất JSON sau mỗi đợt nhập quan trọng, trước thao tác thay thế sổ và trước khi nâng cấp hoặc chuyển thiết bị. Giữ một vài file theo ngày ở nơi riêng tư ngoài dữ liệu website. Bản sao JSON và file Excel chưa được mã hóa; không commit, tải lên issue hay gửi kèm báo lỗi công khai.
+1. Trong **Cài đặt & dữ liệu → Sao lưu tự động → File JSON tự cập nhật**, bấm **Chọn file sao lưu** nếu trình duyệt cung cấp nút này.
+2. Chọn nơi lưu và tên file, rồi cấp quyền theo hộp thoại trình duyệt. File được chọn sẽ chứa toàn bộ sổ hiện tại và được ghi lại khi sổ thay đổi; giữ bản cũ riêng nếu muốn lưu nhiều mốc lâu dài.
+3. Sau khi thêm, sửa, xóa giao dịch, cộng tiền mục tiêu hoặc lưu thay đổi khác, giữ app mở đến khi trạng thái hiện **Đã sao lưu file**. Mục **Ghi file thành công gần nhất** chỉ cập nhật sau khi luồng ghi file đóng thành công.
+4. Nếu app báo cần quyền, bấm **Cho phép ghi file**. Nếu muốn kiểm tra lại ngay, dùng **Cập nhật file ngay**. Có thể **Đổi file** hoặc **Ngừng liên kết**; ngừng liên kết không xóa file đã lưu.
+
+App ghi nhớ liên kết trong IndexedDB khi trình duyệt cho phép, nhưng quyền ghi có thể hết sau khi đóng app hoặc bị thu hồi. Nếu liên kết chỉ dùng được trong phiên hiện tại, app hiển thị rõ và bạn cần chọn lại lần sau. App chỉ kiểm tra quyền khi mở; không tự bật hộp xin quyền. Nếu ghi file thất bại, sổ chính đã lưu vẫn còn và app hiển thị lỗi sao lưu. Đừng đóng app khi vẫn báo đang ghi; mở lại app có thể cập nhật file từ sổ chính còn hợp lệ, nhưng không cứu được dữ liệu đã bị xóa ở mọi nơi.
+
+App kiểm tra `showSaveFilePicker` trên trình duyệt đang chạy. [Chrome công bố File System Access trên Android từ phiên bản 132](https://developer.chrome.com/release-notes/132#file-system-access-for-android-and-webview); không phải mọi trình duyệt trên điện thoại đều cung cấp chức năng này. Nếu không có nút chọn file, dùng tải tự động hoặc chia sẻ thủ công bên dưới.
+
+### Tải một JSON mới sau mỗi lần lưu
+
+Bật **Tải một bản JSON sau mỗi lần lưu** để yêu cầu tải file mới sau mỗi thay đổi đã lưu. Tên có dấu thời gian và mã riêng để giữ nhiều mốc. Chế độ này tạm ngừng cập nhật file đã liên kết; liên kết vẫn được ghi nhớ nếu có. Tắt lựa chọn sẽ dừng tải tự động; muốn quay lại cập nhật một file, chọn **Cho phép ghi file** hoặc chọn lại file.
+
+Cho phép tải nhiều file nếu trình duyệt hỏi và kiểm tra mục Tải xuống/Tệp. Trình duyệt có thể chặn tải hoặc mở bảng chọn nơi lưu; **Lần yêu cầu tải gần nhất chỉ chứng minh app đã yêu cầu tải**, không chứng minh hệ điều hành đã lưu file. Nếu tải bị chặn, dùng nút tải/chia sẻ thủ công. Không có cách ghi file âm thầm trên một trình duyệt không cấp quyền tương ứng.
+
+### Tải hoặc chia sẻ thủ công
+
+Chọn **Tải bản sao JSON** trong Cài đặt hoặc **Sao lưu dữ liệu** ở thanh điều hướng. **Lưu / chia sẻ bản sao** mở bảng chia sẻ khi thiết bị hỗ trợ file: có thể chọn **Lưu vào Tệp**, iCloud Drive hoặc ứng dụng riêng của bạn. Nếu không hỗ trợ, app chuyển sang tải JSON; nếu bạn hủy bảng chia sẻ, file chưa được xác nhận đã lưu.
+
+**Lần xuất gần nhất** ghi lúc app khởi tạo lượt tải; thời điểm này không nằm trong sổ JSON và không tự chuyển thiết bị. Luôn kiểm tra file ở nơi nhận. Giữ thêm vài bản theo ngày ngoài dữ liệu website, đặc biệt trước nhập/khôi phục sổ, đổi máy, xóa dữ liệu hoặc xóa/thêm lại app màn hình chính. JSON và Excel chưa được mã hóa; không commit, tải lên issue hoặc gửi kèm báo lỗi công khai.
+
+### Lịch sử tự động trên thiết bị
+
+App giữ tối đa **30 mốc lưu gần nhất** trong IndexedDB, kể cả khi chưa bật sao lưu ra file. Bản trùng liên tiếp không chiếm thêm vị trí. Mỗi bản được kiểm tra trước khi cho khôi phục; xem hướng dẫn ở mục 4. **Ưu tiên giữ dữ liệu** chỉ gửi yêu cầu lưu trữ bền vững tới trình duyệt; bị từ chối sẽ được thông báo, và được cấp vẫn không ngăn bạn xóa dữ liệu website.
+
+Lịch sử thuộc cùng thiết bị, hồ sơ trình duyệt và origin, không phải bản sao cloud. Xóa dữ liệu website hoặc mất máy có thể làm mất cả sổ và lịch sử. Nếu IndexedDB bị chặn/đầy, app báo phần lịch sử chưa hoàn tất; file sao lưu độc lập vẫn có thể hoạt động nếu đã được cấp quyền.
 
 ### Phạm vi xuất Excel
 
@@ -86,7 +126,7 @@ Dòng tổng là tổng của **toàn bộ phạm vi đã xuất**, không tự 
 
 Excel không chứa đầy đủ cấu hình ví, số dư ban đầu, ngân sách, mục tiêu và lịch để khôi phục app. Luôn dùng JSON cho mục đích khôi phục hoặc chuyển thiết bị.
 
-## 4. Nhập bản sao và phục hồi trạng thái trước
+## 4. Nhập bản sao và phục hồi
 
 ### Nhập JSON
 
@@ -99,11 +139,17 @@ Nhập JSON **thay thế toàn bộ sổ**, không gộp giao dịch. Dữ liệ
 
 Nếu có thông báo dữ liệu đã thay đổi ở tab khác, thao tác chưa được áp dụng. Xem lại sổ mới nhất và thực hiện lại quyết định nhập; không mở nhiều tab rồi xác nhận thay thế đồng thời.
 
-### Bản phục hồi trên thiết bị
+### Chọn một bản trong lịch sử tự động
+
+Vào **Cài đặt & dữ liệu → Sao lưu tự động → Xem lịch sử phục hồi**. Mỗi dòng có thời điểm, lý do thay đổi và số giao dịch/ví/mục tiêu. Có thể **Tải JSON** để giữ riêng hoặc **Khôi phục** rồi xác nhận thay sổ hiện tại. Tải sổ hiện tại trước nếu vẫn cần; app không gộp các bản.
+
+Sau khi khôi phục thành công, lịch sử tiếp tục ghi nhận sổ mới và chế độ file đang bật tiếp tục sao lưu sổ đó. Các bản cũ chỉ nằm trong giới hạn 30 bản, nên xuất JSON nếu cần giữ lâu. Nếu bản chính bị mất nhưng lịch sử vẫn còn, app chặn ghi tiếp cho đến khi bạn kiểm tra phục hồi hoặc chủ động xác nhận **Dùng sổ trống**. Việc mở sổ trống/lỗi không tự tạo lịch sử trống hoặc ghi đè file sao lưu.
+
+### Một trạng thái trước lần lưu gần nhất
 
 Trước khi lưu một thay đổi, app chụp lại trạng thái hợp lệ hiện có, nếu có, trong một vị trí phục hồi riêng. Chọn **Tải bản phục hồi** để giữ file hoặc **Khôi phục trạng thái này** để thay thế sổ hiện tại sau xác nhận. Dữ liệu bị lỗi không được dùng làm bản phục hồi hợp lệ.
 
-Đây là **một vị trí lưu**, không phải lịch sử nhiều phiên bản. Lần thay đổi tiếp theo có thể ghi đè trạng thái cũ. Thao tác lưu không thay đổi dữ liệu không tạo thêm trạng thái phục hồi. Khi khôi phục từ một sổ hiện tại còn hợp lệ, sổ đó được giữ làm trạng thái trước đó; các lần ghi tiếp theo vẫn có thể ghi đè vị trí này.
+Mục **Bản phục hồi trên thiết bị** là **một vị trí lưu riêng**, được giữ từ cơ chế cũ và bổ sung cho lịch sử 30 bản. Lần thay đổi tiếp theo có thể ghi đè vị trí này. Thao tác lưu không thay đổi dữ liệu không tạo thêm trạng thái phục hồi. Khi khôi phục từ một sổ hiện tại còn hợp lệ, sổ đó được giữ làm trạng thái trước đó; các lần ghi tiếp theo vẫn có thể ghi đè vị trí này.
 
 Bản phục hồi nằm cùng trình duyệt và origin với sổ. Xóa dữ liệu website, mất thiết bị hoặc dùng hồ sơ trình duyệt khác có thể làm mất cả hai. Sau khi xóa/sửa nhầm, nên dừng các lần ghi tiếp theo và kiểm tra mục phục hồi trước.
 
@@ -113,11 +159,16 @@ Bản phục hồi nằm cùng trình duyệt và origin với sổ. Xóa dữ l
 
 | Hiện tượng | Hành động |
 | --- | --- |
-| Bộ nhớ website đầy | Thay đổi chưa được lưu. Xuất JSON của sổ hiện có và kiểm tra file. App cần chỗ cho cả sổ và một bản phục hồi; có thể chuyển sổ sang hồ sơ trình duyệt/thiết bị có bộ nhớ khả dụng bằng JSON. Chỉ dọn dữ liệu sau khi có bản sao ngoài trình duyệt đã kiểm tra. |
+| Lưu sổ chính báo bộ nhớ đầy | Thay đổi chưa được lưu. Xuất JSON của sổ hiện có và kiểm tra file. App cần chỗ cho cả sổ và một bản phục hồi; có thể chuyển sổ sang hồ sơ trình duyệt/thiết bị có bộ nhớ khả dụng bằng JSON. Chỉ dọn dữ liệu sau khi có bản sao ngoài trình duyệt đã kiểm tra. |
+| Sổ đã lưu nhưng lịch sử chưa hoàn tất | Đây là lỗi bản sao IndexedDB, khác với lỗi ghi sổ chính. Tải JSON hoặc kiểm tra file tự cập nhật; không nhập lại giao dịch vừa lưu chỉ vì sao lưu lỗi. |
+| File cần quyền hoặc chưa cập nhật | Giữ app mở, vào Sao lưu tự động, bấm **Cho phép ghi file** hoặc chọn lại nơi lưu. Đối chiếu thời điểm ghi file thành công; nếu không cấp quyền được, tải/chia sẻ JSON thủ công. |
+| Tải JSON tự động không thấy file | Kiểm tra quyền tải nhiều file và mục Tải xuống/Tệp. Thời điểm yêu cầu tải không bảo đảm file đã lưu; dùng **Lưu / chia sẻ bản sao** hoặc tải thủ công. |
 | Trình duyệt không cho đọc hoặc ghi bộ nhớ | Kiểm tra quyền lưu dữ liệu của website và chế độ duyệt riêng tư. App không báo lưu thành công khi ghi thất bại. Giữ tab còn dữ liệu mở, xuất JSON nếu có thể, rồi thử với hồ sơ trình duyệt cho phép lưu. |
 | Dữ liệu thay đổi ở tab khác | Dừng thao tác đang chờ, xem bản mới nhất rồi mở lại biểu mẫu hoặc hộp xác nhận. Dùng một tab để chỉnh sửa. Không mặc định rằng nội dung biểu mẫu cũ đã được lưu. |
 | Bản lưu bị lỗi | App giữ nguyên dữ liệu gốc thay vì tự xóa. Chọn **Tải dữ liệu gốc bị lỗi** để bảo toàn thông tin; đây chưa phải bản sao hợp lệ. Có thể tải riêng **Sổ đang hiển thị (JSON)** và bản phục hồi nếu có, rồi khôi phục từ bản hợp lệ. Sổ đang hiển thị không chứa phần dữ liệu gốc không đọc được. |
 | Bản lưu bị xóa ở nơi khác nhưng tab vẫn hiển thị sổ | Giữ tab mở và tải JSON ngay. Bản đang hiển thị có thể chỉ còn trong bộ nhớ phiên; cần xác nhận khôi phục hoặc nhập JSON để lưu trở lại. |
+| Mở lại thấy bản chính mất nhưng còn phục hồi/lịch sử | Vào Cài đặt, tải bản tìm thấy và kiểm tra số giao dịch trước khi khôi phục. Chỉ chọn **Dùng sổ trống** khi muốn bắt đầu lại; các thay đổi tiếp theo có thể cập nhật file đang liên kết bằng sổ mới. |
+| Mở biểu tượng mới trên iPhone thấy sổ trống | Mở lại Safari hoặc biểu tượng cũ đang giữ sổ, xuất JSON và nhập vào nơi mới. Không xóa bản cũ trước khi đối chiếu xong. |
 | Không có bản phục hồi hợp lệ | Dùng JSON đã tải xuống. App không có bản sao máy chủ để lấy lại dữ liệu đã mất ở cả trình duyệt lẫn file sao lưu. |
 
 Lưu trữ kiểm tra phiên dữ liệu trước khi ghi và kiểm tra lại sau khi tạo bản phục hồi. Nếu phát hiện xung đột hoặc không tạo được bản phục hồi cần thiết, app dừng thao tác. Tuy nhiên, `localStorage` không cung cấp giao dịch nguyên tử giữa nhiều tab; cơ chế này giảm nguy cơ ghi đè, không biến app thành hệ thống chỉnh sửa đồng thời.
@@ -141,15 +192,18 @@ npm run check
 npm test
 ```
 
-Sau đó kiểm tra trên trình duyệt việc mở trang, thêm/sửa/xóa một giao dịch thử, ghi một khoản chuyển ví, tải JSON và nhập lại trên một hồ sơ thử riêng. Không dùng sổ thật để thực hiện các thao tác thử có thể thay thế dữ liệu. CI hỗ trợ kiểm tra mã; nó không thay cho việc đối chiếu một luồng sử dụng trong trình duyệt.
+Sau đó kiểm tra trên một hồ sơ thử: thêm/sửa/xóa giao dịch, chuyển ví, xuất Excel, tải/nhập JSON, lịch sử sau tải lại trang, cấp/thu hồi quyền file và thông báo sao lưu lỗi. Kiểm tra thêm bố cục hẹp, biểu mẫu khi bàn phím mở, chế độ tối, cài màn hình chính, tải lại ngoại tuyến và cập nhật khi còn nội dung chưa lưu. Không dùng sổ thật cho các thử nghiệm thay thế dữ liệu.
+
+CI kiểm tra mã và các tình huống giả lập, không thay cho một luồng sử dụng thực tế. **Bản 1.3.0 chưa có xác nhận kiểm thử trên iPhone/Android vật lý.** Trước khi dựa vào một thiết bị cụ thể, đối chiếu một giao dịch thử, mở lại từ biểu tượng và xác nhận file JSON thực sự xuất hiện ở nơi lưu trên máy đó.
 
 ### Bảo toàn dữ liệu khi nâng cấp
 
 1. Xuất JSON trước khi thay phiên bản.
 2. Giữ nguyên **origin** — giao thức, tên miền và cổng — nếu muốn trình duyệt tiếp tục dùng sổ hiện có.
 3. Giữ khóa chính `vi-minh:v1`. Đây là khóa tương thích dữ liệu cũ, không phải tên hiển thị hay phiên bản schema hiện tại.
-4. Triển khai đồng bộ các file trong `dist/`, rồi tải lại trang. Không xóa bộ nhớ để buộc cập nhật giao diện.
-5. Đối chiếu số dư, giao dịch và ngân sách; tải bản JSON mới sau khi xác nhận dữ liệu đúng.
+4. Tăng `VERSION` trong `dist/sw.js` mỗi khi sửa file được lưu ngoại tuyến và triển khai đồng bộ toàn bộ `dist/`. Giữ `manifest.webmanifest`, `sw.js`, các module, CSS và `icons/` trong gói Pages.
+5. Khi có mạng, dùng **Kiểm tra cập nhật** trong Cài đặt. Lưu xong công việc, đợi sao lưu hoàn tất rồi bấm **Cập nhật/Cập nhật ứng dụng** khi bản mới sẵn sàng; có thể chọn **Để sau**. App hỏi trước nếu còn nội dung chưa lưu, chờ tác vụ sao lưu đang chạy rồi tải lại. Nếu cập nhật được chấp nhận ở tab khác, app không tự tải lại tab đang nhập dở.
+6. Đối chiếu số dư, giao dịch và ngân sách; tải bản JSON mới sau khi xác nhận dữ liệu đúng. **Không xóa dữ liệu website để buộc cập nhật.** Nếu tải bản mới lỗi, bản đã cài vẫn dùng được; kết nối mạng rồi thử lại.
 
 Schema sổ v1/v2 được đọc và chuẩn hóa thành v3 trong bộ nhớ, chưa ghi đè dữ liệu chỉ vì mở app. Lần lưu chủ động thành công tiếp theo ghi v3. Các bản ghi có sẵn được giữ nguyên; danh mục tự tạo và lịch định kỳ là các phần bổ sung. Đổi tên hiển thị sản phẩm không làm đổi khóa dữ liệu, nhưng chuyển sang GitHub Pages làm đổi origin nên cần nhập lại bản sao JSON.
 
@@ -169,8 +223,8 @@ Sau khi chuyển, ghi tiếp tại địa chỉ GitHub Pages. Thay đổi tại 
 
 Trong **Cài đặt & dữ liệu → Giao diện**, chọn Sáng, Tối hoặc Theo hệ thống. Nút góc trên chuyển nhanh giữa sáng và tối. Lựa chọn được lưu riêng trên trình duyệt, không nằm trong JSON tài chính; khi chuyển thiết bị có thể cần chọn lại. Nếu bộ nhớ bị chặn, app vẫn áp dụng lựa chọn trong phiên hiện tại và báo rằng chưa lưu được.
 
-Bản GitHub Pages là website công khai, mở trực tiếp mà không cần đăng nhập ChatGPT. Công khai website chỉ phục vụ mã ứng dụng; dữ liệu tài chính vẫn nằm trong `localStorage` trên trình duyệt của người dùng. App chưa mã hóa sổ hoặc file sao lưu và chưa tách dữ liệu theo tài khoản đăng nhập trong cùng hồ sơ trình duyệt. Người dùng chung hồ sơ đó có thể đọc sổ tại cùng origin.
+Bản GitHub Pages là website công khai, mở trực tiếp mà không cần đăng nhập ChatGPT. GitHub chỉ phục vụ mã ứng dụng; sổ nằm trong `localStorage`, lịch sử và liên kết file nằm trong IndexedDB, còn JSON ở nơi bạn tải/chọn/chia sẻ. App không tải sổ lên repository, không có đăng nhập hay đồng bộ tài khoản. App chưa mã hóa sổ/file; người dùng chung hồ sơ trình duyệt có thể đọc sổ tại cùng origin.
 
 Không đưa file tài chính, log chứa nội dung giao dịch, thông tin xác thực hoặc API secret vào repository. Repository chỉ cần mã nguồn, kiểm thử, tài liệu và cấu hình triển khai; dữ liệu dùng thật nằm trong trình duyệt và các file người dùng tự xuất.
 
-Phiên bản này phục vụ sổ cá nhân tại một trình duyệt, có danh mục riêng, lịch thu/chi cần xác nhận và xuất Excel. Theo dõi vay/nợ chuyên biệt, sổ dùng chung, kết nối ngân hàng và đồng bộ nhiều thiết bị chưa được triển khai. Những khả năng đó cần mô hình dữ liệu và quy trình vận hành riêng; đồng bộ còn cần máy chủ lưu trữ, danh tính, phân quyền, kiểm soát xung đột và sao lưu được kiểm chứng. Xem [đối chiếu tính năng](COMPARISON.md) để biết lý do ưu tiên của bản 1.2.
+Phiên bản 1.3 bổ sung dùng trên màn hình chính, ngoại tuyến, sao lưu file và lịch sử cho sổ cá nhân. Theo dõi vay/nợ chuyên biệt, sổ dùng chung, kết nối ngân hàng và đồng bộ nhiều thiết bị chưa được triển khai. Đồng bộ cần máy chủ lưu trữ, danh tính, phân quyền, kiểm soát xung đột và sao lưu được kiểm chứng. Xem [đối chiếu tính năng](COMPARISON.md) về các ưu tiên tính năng từ bản 1.2.

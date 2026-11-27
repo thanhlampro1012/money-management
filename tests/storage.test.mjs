@@ -56,6 +56,55 @@ test('a fresh installation persists an empty personal book, never demonstration 
   assert.deepEqual(JSON.parse(storage.getItem(KEY)), result.state);
 });
 
+test('cold start with only a valid recovery preserves it and requires explicit restoration before edits', () => {
+  const recovered = ledger('Sổ cần khôi phục');
+  recovered.transactions.push({
+    id: 'surviving-transaction', type: 'expense', amount: 85000,
+    date: '2026-11-26', categoryId: 'food', accountId: 'cash',
+    note: 'Giao dịch còn trong bản phục hồi', createdAt: '2026-11-26T09:00:00.000Z',
+  });
+  const recoveryRaw = JSON.stringify({ version: 1, savedAt: '2026-11-26T10:00:00.000Z', state: recovered });
+  const storage = new MemoryStorage({ [RECOVERY]: recoveryRaw });
+  const store = new LedgerStore(storage);
+
+  const opened = store.load();
+  assert.deepEqual(opened.state, recovered);
+  assert.equal(opened.raw, null);
+  assert.equal(opened.recoveryAvailable, true);
+  assert.ok(opened.issue);
+  assert.equal(storage.getItem(KEY), null);
+  assert.equal(storage.getItem(RECOVERY), recoveryRaw);
+  assert.equal(storage.writes.length, 0);
+
+  const ordinaryEdit = structuredClone(opened.state);
+  ordinaryEdit.profile.name = 'Tên chưa được lưu';
+  assert.throws(() => store.save(ordinaryEdit), { code: 'MISSING_STORAGE' });
+  assert.deepEqual(store.refresh().state, recovered);
+  assert.equal(storage.getItem(KEY), null);
+  assert.equal(storage.getItem(RECOVERY), recoveryRaw);
+  assert.equal(storage.writes.length, 0);
+
+  assert.deepEqual(store.restoreRecovery(), recovered);
+  assert.deepEqual(JSON.parse(storage.getItem(KEY)), recovered);
+  assert.deepEqual(store.getRecovery().state, recovered);
+  assert.equal(store.load().issue, '');
+  assert.equal(store.save(ordinaryEdit).profile.name, 'Tên chưa được lưu');
+});
+
+test('cold-start recovery cannot replace a primary created by another tab before confirmation', () => {
+  const recoveryRaw = JSON.stringify({ version: 1, savedAt: '2026-11-26T10:00:00.000Z', state: ledger('Bản phục hồi') });
+  const storage = new MemoryStorage({ [RECOVERY]: recoveryRaw });
+  const store = new LedgerStore(storage);
+  store.load();
+  const latest = JSON.stringify(ledger('Sổ mới nhất từ tab khác'));
+  storage.setItem(KEY, latest);
+
+  assert.throws(() => store.restoreRecovery(), { code: 'CONFLICT' });
+  assert.equal(storage.getItem(KEY), latest);
+  assert.equal(storage.getItem(RECOVERY), recoveryRaw);
+  assert.equal(store.refresh().state.profile.name, 'Sổ mới nhất từ tab khác');
+});
+
 test('legacy v1 books normalize in memory without rewriting the original on load', () => {
   const legacy = ledger('Sổ cũ');
   legacy.version = 1;
@@ -231,10 +280,21 @@ test('invalid or absent recovery metadata is safely rejected', () => {
   const { storage, store } = existing();
   assert.equal(store.getRecovery(), null);
   assert.throws(() => store.restoreRecovery(), { code: 'NO_RECOVERY' });
-  for (const raw of ['broken', '{}', JSON.stringify({ version: 1, savedAt: '2026-02-31', state: ledger() }), JSON.stringify({ version: 1, savedAt: new Date().toISOString(), state: { version: 1 } })]) {
+  const valid = { version: 1, savedAt: '2026-11-26T10:00:00.000Z', state: ledger() };
+  for (const raw of [
+    'broken', '{}', '[]',
+    JSON.stringify({ ...valid, version: 2 }),
+    JSON.stringify({ ...valid, savedAt: '2026-02-31' }),
+    JSON.stringify({ ...valid, savedAt: '2026-02-31T10:00:00.000Z' }),
+    JSON.stringify({ ...valid, extra: 'unsupported metadata' }),
+    JSON.stringify({ ...valid, state: { version: 1 } }),
+  ]) {
     storage.setItem(RECOVERY, raw);
+    const before = storage.writes.length;
     assert.equal(store.getRecovery(), null);
     assert.throws(() => store.restoreRecovery(), { code: 'NO_RECOVERY' });
+    assert.equal(storage.getItem(RECOVERY), raw);
+    assert.equal(storage.writes.length, before);
   }
 });
 

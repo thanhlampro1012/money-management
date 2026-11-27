@@ -8,7 +8,7 @@ const args = process.argv.slice(2);
 const argument = name => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
 const port = Number(argument('--port') || process.env.PORT || 8080);
 const host = argument('--host') || '0.0.0.0';
-const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.svg':'image/svg+xml', '.json':'application/json' };
+const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png', '.webmanifest':'application/manifest+json', '.json':'application/json' };
 createServer(async (req, res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);

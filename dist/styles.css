@@ -693,6 +693,33 @@ textarea.form-control { resize: vertical; min-height: 90px; }
   .span-2 { grid-column: auto; }
   .chart-legend > .muted { flex: 1 0 100%; margin-left: 0; }
 }
+.backup-settings { grid-column: 1 / -1; }
+.backup-settings .card-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; }
+.backup-settings .card-body > p, .backup-settings .card-body > .backup-recovery-callout { grid-column: 1 / -1; }
+.backup-option { min-width: 0; border-top: 1px solid var(--border); padding-top: 18px; }
+.backup-option:first-of-type { grid-row: span 2; }
+.backup-option h3 { margin: 0 0 10px; font-size: .9375rem; }
+.backup-option p { line-height: 1.7; }
+.backup-option .settings-actions { margin: 14px 0; }
+.backup-option .backup-status { flex-wrap: wrap; overflow-wrap: anywhere; margin-top: 14px; }
+.backup-toggle { min-height: 44px; align-items: flex-start; padding-top: 4px; color: var(--ink); font-weight: 600; }
+.backup-toggle input { flex: 0 0 auto; margin-top: 3px; }
+.backup-persistence { color: var(--primary); font-size: .8125rem; line-height: 1.6; align-self: center; }
+.backup-history-list { display: grid; gap: 14px; }
+.backup-history-item { border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.backup-history-item p { margin-top: 6px; line-height: 1.6; overflow-wrap: anywhere; }
+.backup-history-item .settings-actions { margin-top: 12px; }
+.backup-reminder { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 20px; padding: 13px 15px; border: 1px solid var(--border); border-radius: 7px; color: var(--muted); font-size: .8125rem; line-height: 1.6; }
+.backup-reminder > span { flex: 1 1 200px; }
+.backup-reminder a { color: var(--primary); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.backup-recovery-callout { border: 1px solid var(--border); padding: 16px; border-radius: 7px; }
+.backup-recovery-callout p { margin-top: 8px; }
+@media (max-width: 700px) {
+  .backup-settings .card-body { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .backup-option:first-of-type { grid-row: auto; }
+  .backup-option .settings-actions > .btn { flex: 1 1 150px; }
+  .backup-history-item { padding: 14px; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 }
