@@ -8,7 +8,6 @@
 
 Money Management phục vụ **một người quản lý sổ trên một trình duyệt và một địa chỉ website**. Sổ chính lưu trong `localStorage`; lịch sử phục hồi lưu trong IndexedDB trên cùng thiết bị. Bạn chọn thêm cách giữ file JSON riêng trong Cài đặt. App chưa có đăng nhập tài khoản, máy chủ dữ liệu, đồng bộ nhiều thiết bị, mã hóa sổ hoặc kết nối ngân hàng. Chức năng chuyển giữa ví chỉ ghi nhận việc chuyển tiền đã thực hiện, không gọi API chuyển tiền.
 
-Bản GitHub Pages mở trực tiếp trên trình duyệt, không yêu cầu đăng nhập ChatGPT. Website công khai cung cấp mã ứng dụng; sổ tài chính vẫn nằm trong trình duyệt của người dùng, không được tải lên GitHub hoặc đồng bộ giữa các thiết bị.
 
 ## Tính năng
 
