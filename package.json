@@ -1,13 +1,15 @@
 {
   "name": "money-management",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
-  "description": "Quản lý thu chi cá nhân, Excel, offline, bảo vệ dữ liệu AES-GCM và đồng bộ Gist mã hóa.",
+  "description": "Quản lý thu chi VND, mã hóa sổ và đồng bộ an toàn giữa thiết bị qua Firebase Auth + Firestore.",
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check dist/app.js && node --check dist/finance.js && node --check dist/storage.js && node --check dist/backup.js && node --check dist/input.js && node --check dist/pwa.js && node --check dist/vault.js && node --check dist/cloud.js && node --check dist/sw.js && node --check dist/theme.js && node --check dist/export.js && node --check dist/export-template.js && node --check scripts/serve.mjs"
+    "check": "node --check dist/app.js && node --check dist/finance.js && node --check dist/storage.js && node --check dist/backup.js && node --check dist/input.js && node --check dist/pwa.js && node --check dist/vault.js && node --check dist/cloud.js && node --check dist/firebase-sync.js && node --check dist/firebase-transport.js && node --check dist/sw.js && node --check dist/theme.js && node --check dist/export.js && node --check dist/export-template.js && node --check scripts/serve.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

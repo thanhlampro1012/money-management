@@ -6,6 +6,7 @@ import { initTheme, getThemePreference, getResolvedTheme, setThemePreference } f
 import { BackupManager } from './backup.js';
 import { LocalVault, EncryptedBackupRepository, unlockVaultBeforeApp, VAULT_KEY } from './vault.js';
 import { GitHubCloudSync } from './cloud.js';
+import { FirebaseLedgerSync } from './firebase-sync.js';
 import { parseVndAmount, formatVndInput } from './input.js';
 import { initPwa, renderPwaSettings } from './pwa.js';
 
@@ -64,7 +65,7 @@ let pendingEncryptedImport = null, cloudBusy = false;
 const mobileNavigation = matchMedia('(max-width: 850px)');
 const primaryMissingAtBoot = readPrimaryRaw() === null;
 let state = loadState();
-let backups = null, cloud = null;
+let backups = null, cloud = null, firebaseSync = null;
 backups = new BackupManager({
   repository: new EncryptedBackupRepository(vault),
   encryptExternal: raw => vault.enabled ? vault.encryptExport(raw) : JSON.stringify(JSON.parse(raw),null,2),
@@ -78,6 +79,13 @@ backups = new BackupManager({
   onChange: () => { if (backups) refreshBackupStatus(); },
 });
 cloud = new GitHubCloudSync({ vault, readState: () => state, onChange: () => { if (cloud) refreshCloudStatus(); } });
+firebaseSync = new FirebaseLedgerSync({
+  vault, readState: () => state,
+  // A remote revision may replace the ledger ONLY when local edits are clean.
+  canApplyRemote: () => backupsReady && !savingLedger && !cloudBusy && !formDirty && !$('.modal') && !backupNeedsRecovery && !storageIssue && (profileDraft === null || profileDraft === state.profile.name) && !$('#firebase-settings')?.contains(document.activeElement),
+  applyRemote: async remote => commit(remote, {replace: true, reason: 'Nhận sổ Firebase', cloudPush: false, firebasePush: false}),
+  onChange: () => { if (firebaseSync) refreshFirebaseStatus(); },
+});
 
 function readPrimaryRaw() {
   try { return secureStorage.getItem(KEY); } catch { return undefined; }
@@ -105,7 +113,7 @@ function sanitizeFilters() {
 }
 
 let savingLedger = false;
-async function commit(next, { replace = false, reason = 'Cập nhật sổ', cloudPush = true } = {}) {
+async function commit(next, { replace = false, reason = 'Cập nhật sổ', cloudPush = true, firebasePush = true } = {}) {
   if (savingLedger) { toast('Thay đổi trước đang được lưu. Hãy thử lại sau khi hoàn tất.', true); return false; }
   if (!backupsReady) { toast('Đang mở sổ và kiểm tra bản sao. Hãy lưu lại sau một chút.', true); return false; }
   if (backupNeedsRecovery && !replace) { toast('Có lịch sử của sổ trước. Hãy chọn khôi phục hoặc xác nhận dùng sổ trống trong Cài đặt trước khi ghi tiếp.', true); return false; }
@@ -151,6 +159,7 @@ async function commit(next, { replace = false, reason = 'Cập nhật sổ', clo
         refreshBackupStatus();
       });
       if (cloudPush && cloud?.connection) void cloud.push(state);
+      if (firebasePush && firebaseSync?.status().linked) void firebaseSync.localChanged();
     } catch {
       backupNotice = 'Sổ đã lưu trên trình duyệt. Hãy kiểm tra lại sao lưu tự động trong Cài đặt.';
     }
@@ -405,8 +414,9 @@ function saveStatusMarkup() {
 function backupAttentionMarkup() {
   const s = backups?.getStatus();
   if (backupNeedsRecovery) return `<div class="storage-warning" role="alert">${icon('info')}<span>Bản lưu chính không còn, nhưng vẫn có lịch sử của sổ trước. Hãy kiểm tra bản phục hồi trước khi ghi tiếp.</span><a href="#settings">Khôi phục sổ</a></div>`;
+  const firebaseIssue = firebaseSync?.status()?.conflict ? 'Firebase đang có hai bản sổ khác nhau. App đã dừng ghi lên cloud; hãy chọn bản cần giữ trong Cài đặt.' : '';
   const cloudIssue = cloud?.status()?.remoteChanges ? 'Bản sao trên GitHub đã thay đổi. Đã tạm dừng tự đồng bộ; hãy xem mục Đám mây trong Cài đặt.' : '';
-  const issue = cloudIssue || backupNotice || s?.historyIssue || (s?.mode === 'file' && ['error','needs-permission'].includes(s.fileState) ? s.fileIssue : '') || s?.downloadIssue;
+  const issue = firebaseIssue || cloudIssue || backupNotice || s?.historyIssue || (s?.mode === 'file' && ['error','needs-permission'].includes(s.fileState) ? s.fileIssue : '') || s?.downloadIssue;
   if (issue) return `<div class="storage-warning" role="status">${icon('info')}<span>${esc(issue)}</span><a href="#settings">Kiểm tra sao lưu</a></div>`;
   if (backupsReady && s?.mode === 'off' && state.transactions.length && ui.route !== 'settings') return `<div class="backup-reminder">${icon('shield')}<span>Đã lưu trên trình duyệt. Chọn cách sao lưu file để giữ một bản riêng.</span><a href="#settings">Thiết lập sao lưu</a></div>`;
   return '';
@@ -511,6 +521,97 @@ function refreshCloudStatus() {
   if (panel && !panel.contains(document.activeElement)) panel.outerHTML = cloudMarkup();
   const attention = $('#backup-attention'); if (attention) attention.innerHTML = backupAttentionMarkup();
 }
+
+/** Firebase Authentication + Firestore: optional, private to the signed-in UID. */
+function firebaseMarkup() {
+  const f = firebaseSync.status();
+  const label = ({unconfigured:'Chưa thiết lập',ready:'Sẵn sàng cấu hình',connecting:'Đang kết nối',
+    'signed-out':'Chưa đăng nhập',checking:'Đang kiểm tra bản đám mây',
+    'empty-remote':'Chưa có sổ trên Firebase','missing-remote':'Thiếu bản đám mây',
+    'needs-key':'Cần mật khẩu mã hóa đám mây',incoming:'Cần xác nhận bản đám mây',
+    conflict:'Xung đột hai thiết bị',pending:'Chưa đẩy xong thay đổi',
+    syncing:'Đang đồng bộ',synced:'Đã đồng bộ',offline:'Ngoại tuyến',error:'Có lỗi'})[f.status] || f.status;
+  return `<section class="card settings-section" id="firebase-settings">
+    <div class="card-header"><h2 class="card-title">Đồng bộ điện thoại và máy tính · Firebase</h2></div>
+    <div class="card-body">
+      <p>Đăng nhập cùng tài khoản trên các thiết bị để nhận cập nhật qua <strong>Firebase Authentication + Firestore</strong>. Dữ liệu được <strong>mã hóa trước khi gửi</strong>; repo GitHub không lưu sổ chi tiêu hay mật khẩu.</p>
+      <div class="backup-status"><span>Trạng thái</span><strong id="firebase-live" role="status">${esc(label)}</strong></div>
+      ${f.error ? `<p class="field-error" role="alert">${esc(f.error)}</p>` : ''}
+      <p class="helper-text">${f.configured ? `Dự án Firebase: <code>${esc(f.projectId)}</code> · ` : ''}${f.email ? `Tài khoản: <strong>${esc(f.email)}</strong> · ` : ''}Phiên bản cloud: ${f.revision || 'chưa có'}. ${f.lastSyncedAt ? `Lần đồng bộ: ${backupTime(f.lastSyncedAt)}.` : ''}</p>
+      ${!vault.enabled ? '<p class="helper-text"><strong>Bước 1:</strong> Hãy bật mã hóa dữ liệu trên thiết bị ở phần trên trước khi đồng bộ. Đây là yêu cầu để dữ liệu Firestore luôn được mã hóa.</p>' : ''}
+      <details class="firebase-config" ${!f.configured?'open':''}><summary>${f.configured ? 'Xem / đổi cấu hình dự án Firebase' : 'Bước 1 · Nhập cấu hình Firebase Web App'}</summary>
+        <p class="helper-text">Tạo dự án ở <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer">Firebase Console</a>, bật <strong>Authentication → Email/Password</strong> và <strong>Cloud Firestore</strong>. Dán đối tượng <code>firebaseConfig</code> của ứng dụng Web tại đây; đừng dán mật khẩu, service-account JSON hay private key. Firestore Security Rules phải giới hạn dữ liệu theo UID.</p>
+        <label for="firebase-web-config">Cấu hình Firebase Web App (JSON)</label>
+        <textarea id="firebase-web-config" class="form-control" rows="5" autocomplete="off" spellcheck="false" placeholder='{"apiKey":"...","authDomain":"...firebaseapp.com","projectId":"...","appId":"..."}'></textarea>
+        <div class="settings-actions"><button class="btn secondary" data-action="firebase-configure" ${f.signedIn?'disabled':''}>Lưu cấu hình</button></div>
+        <p class="helper-text">Cấu hình web là thông tin công khai, không phải mật khẩu. Cần cấu hình cùng một Firebase project trên từng thiết bị, trừ khi được tích hợp sẵn vào website. <a href="https://github.com/thanhlampro1012/money-management/blob/main/docs/FIREBASE-SETUP.md" target="_blank" rel="noopener noreferrer">Hướng dẫn thiết lập chi tiết</a>.</p>
+      </details>
+      ${f.configured && vault.enabled && !f.signedIn ? `<div class="firebase-auth-fields">
+        <h3>Đăng nhập tài khoản</h3>
+        <div class="form-group"><label for="firebase-email">Email đăng nhập</label><input id="firebase-email" class="form-control" type="email" autocomplete="username" inputmode="email" placeholder="email@example.com"></div>
+        <div class="form-group"><label for="firebase-password">Mật khẩu tài khoản</label><input id="firebase-password" class="form-control" type="password" autocomplete="current-password" minlength="6"></div>
+        <div class="settings-actions"><button class="btn primary" data-action="firebase-login">Đăng nhập</button><button class="btn secondary" data-action="firebase-register">Tạo tài khoản</button></div>
+      </div>` : ''}
+      ${f.signedIn && vault.enabled ? `<div class="settings-actions"><button class="btn secondary" data-action="firebase-check">Kiểm tra cập nhật</button>${f.linked ? '<button class="btn secondary" data-action="firebase-push">Đồng bộ ngay</button><button class="btn ghost" data-action="firebase-disconnect">Ngắt sổ trên thiết bị</button>' : ''}<button class="btn ghost" data-action="firebase-logout">Đăng xuất</button></div>
+      ${!f.linked ? `<div class="firebase-key-fields"><h3>${f.remoteExists?'Mở sổ đã có trên Firebase':'Tạo bản sổ Firebase đầu tiên'}</h3>
+        <p>Nhập mật khẩu <strong>mã hóa đám mây riêng (ít nhất 12 ký tự)</strong>. Mật khẩu này phải giống nhau khi mở sổ trên thiết bị thứ hai và không thể lấy lại từ Firebase.</p>
+        <div class="form-group"><label for="firebase-cloud-password">Mật khẩu giải mã sổ đám mây</label><input type="password" id="firebase-cloud-password" class="form-control" autocomplete="off" minlength="12" placeholder="Không dùng mật khẩu đăng nhập Firebase"></div>
+        <div class="settings-actions"><button class="btn primary" data-action="${f.remoteExists?'firebase-connect-cloud':'firebase-create-cloud'}">${f.remoteExists?'Giải mã và xem bản cloud':'Tạo bản cloud từ sổ này'}</button></div></div>` : ''}
+      ${f.incoming ? `<div class="firebase-conflict" role="status"><strong>${f.conflict?'Hai thiết bị cùng sửa sổ':'Bản đám mây có cập nhật cần nhận'}</strong><p>${f.remoteSummary ? `${f.remoteSummary.transactions} giao dịch · ${f.remoteSummary.accounts} ví trên đám mây.` : ''} Nhận bản đám mây sẽ thay sổ hiện tại, không tự gộp giao dịch. Hãy tải JSON trước.</p><div class="settings-actions"><button class="btn primary" data-action="firebase-use-cloud">Nhận bản Firebase</button>${f.conflict&&f.linked?'<button class="btn danger" data-action="firebase-keep-local">Ghi đè cloud bằng sổ máy này</button>':''}</div></div>` : ''}
+      ${f.linked ? '<p class="helper-text">Khi có mạng, lưu thu chi sẽ tự gửi bản mã hóa lên Firestore. Thiết bị còn lại nhận cập nhật lúc app mở. Nếu cả hai sửa lúc mất mạng, app giữ hai bản và yêu cầu bạn chọn; không âm thầm gộp/ghi đè. Sổ vẫn lưu được khi offline.</p>' : ''}` : ''}
+      <p class="helper-text">Đây là tính năng tùy chọn. Nếu chưa có Firebase project hoặc chưa đăng nhập, app vẫn ghi chép và sao lưu JSON như cũ. Không đặt thông tin tài khoản Firebase vào GitHub repo.</p>
+    </div></section>`;
+}
+function refreshFirebaseStatus() {
+  const panel = $('#firebase-settings');
+  const f = firebaseSync.status();
+  if (panel && !panel.contains(document.activeElement)) panel.outerHTML = firebaseMarkup();
+  else {
+    const live = $('#firebase-live');
+    if (live) live.textContent = f.error || ({synced:'Đã đồng bộ',syncing:'Đang đồng bộ',conflict:'Xung đột dữ liệu',pending:'Chưa đồng bộ xong',offline:'Ngoại tuyến',incoming:'Đang chờ nhận dữ liệu'})[f.status] || f.status;
+  }
+  const attention = $('#backup-attention'); if (attention) attention.innerHTML = backupAttentionMarkup();
+}
+async function firebaseAction(work, message='') {
+  if (cloudBusy || savingLedger) {toast('Đang có thao tác khác. Hãy hoàn tất thao tác trước.',true);return;}
+  cloudBusy = true;
+  try { await work(); if(message)toast(message); render(); }
+  catch(error) {toast(error.message || 'Firebase chưa thực hiện được thao tác.',true);render();}
+  finally {cloudBusy=false;}
+}
+function firebaseConfigure() {
+  const config = $('#firebase-web-config')?.value || '';
+  void firebaseAction(()=>firebaseSync.configure(config),'Đã lưu cấu hình Firebase trên trình duyệt này.');
+}
+function firebaseLogin(register=false) {
+  const email=$('#firebase-email')?.value||'',password=$('#firebase-password')?.value||'';
+  void firebaseAction(()=>firebaseSync.signIn(email,password,register),register?'Đã tạo tài khoản. Bạn có thể liên kết sổ.':'Đã đăng nhập Firebase.');
+}
+function firebaseCloudAction(create=false) {
+  if(!backupsReady || backupNeedsRecovery || storageIssue){toast('Hãy kiểm tra bản sổ và lịch sử phục hồi trước khi đưa dữ liệu lên Firebase.',true);return;}
+  const password=$('#firebase-cloud-password')?.value||'';
+  if(password.length<12){toast('Mật khẩu mã hóa đám mây phải có ít nhất 12 ký tự.',true);return;}
+  if(create && !window.confirm('Tạo sổ Firebase từ sổ trên thiết bị này? Hãy chắc chắn đây là sổ bạn muốn dùng làm bản gốc.'))return;
+  void firebaseAction(()=>create?firebaseSync.createCloud(password):firebaseSync.connectCloud(password),
+    create?'Đã tạo bản sao Firebase mã hóa. Thiết bị khác có thể đăng nhập và nhận sổ.':'Đã giải mã bản cloud. Hãy xác nhận Nhận bản Firebase để lưu lên thiết bị.');
+}
+function firebaseUseCloud() {
+  const remote = firebaseSync.status().remoteSummary;
+  if (!remote) {toast('Chưa giải mã được bản Firebase cần nhận.',true);return;}
+  confirmModal('Nhận sổ Firebase về máy?', `<p>Đám mây hiện có <strong>${remote.transactions} giao dịch</strong>, <strong>${remote.accounts} ví</strong>.</p><p><strong>Thao tác sẽ thay toàn bộ sổ trên máy này.</strong> Hãy tải JSON của sổ hiện tại trước để giữ mọi chỉnh sửa chưa đồng bộ.</p>`, async()=>{
+    closeModal(true);
+    try { await firebaseSync.useRemote();resetFilters();render();toast('Đã nhận và lưu sổ từ Firebase.'); }
+    catch(error){toast(error.message,true);}
+  },'Nhận và thay sổ',true);
+}
+function firebaseKeepLocal() {
+  if(!firebaseSync.status().conflict)return;
+  confirmModal('Ghi đè bản Firebase?', '<p>Thiết bị khác có các giao dịch khác với sổ này. <strong>Ghi đè sẽ thay toàn bộ bản đám mây bằng sổ trên máy hiện tại.</strong> Các thay đổi từ thiết bị kia sẽ không được gộp vào. Chỉ làm nếu bạn đã tải JSON của cả hai sổ.</p>',async()=>{
+    closeModal(true);
+    try {await firebaseSync.keepLocal();render();toast('Đã chủ động thay bản đám mây bằng sổ trên máy này.');}
+    catch(error){toast(error.message,true);}
+  },'Tôi xác nhận ghi đè Firebase',true);
+}
 async function enableVault() {
   if (cloudBusy || savingLedger || !backupsReady || backupNeedsRecovery || storageIssue) { toast('Hãy hoàn tất lưu và khôi phục sổ trước khi bật mã hóa.',true);return; }
   const password=$('#vault-new-password')?.value || '', confirm=$('#vault-confirm-password')?.value || '';
@@ -583,11 +684,12 @@ function renderSettings() {
     ${renderPwaSettings()}
     ${securityMarkup()}
     ${cloudMarkup()}
+    ${firebaseMarkup()}
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Giao diện</h2></div><div class="card-body"><div class="form-group"><label for="theme-preference">Chế độ hiển thị</label><select id="theme-preference" class="form-control">${[['system','Theo hệ thống'],['light','Sáng'],['dark','Tối']].map(([value,label])=>`<option value="${value}" ${getThemePreference()===value?'selected':''}>${label}</option>`).join('')}</select></div><p class="helper-text">Lựa chọn được nhớ trên trình duyệt này. Bạn cũng có thể đổi nhanh bằng nút ở góc trên.</p></div></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Thông tin cá nhân</h2></div><form id="profile-form" class="card-body"><div class="form-group"><label for="profile-name">Tên hiển thị</label><input id="profile-name" class="form-control" name="name" value="${esc(profileDraft ?? state.profile.name)}" required maxlength="60"></div><div class="form-group"><label for="currency">Đơn vị tiền tệ</label><input id="currency" class="form-control" value="Việt Nam đồng (VND)" disabled></div><button class="btn primary" type="submit">Lưu thay đổi</button><button class="btn ghost" type="button" data-action="discard-profile-draft">Hủy sửa tên</button></form></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Sao lưu & khôi phục</h2></div><div class="card-body"><p>Sổ được lưu trên trình duyệt này. Tải bản sao JSON để giữ dữ liệu khi đổi thiết bị, đổi địa chỉ website hoặc xóa dữ liệu duyệt web.</p><div class="backup-status"><span>Lần xuất gần nhất</span><strong>${timestampLabel(lastBackup)}</strong></div><div class="settings-actions"><button class="btn secondary" data-action="backup">${icon('download')}${corruptRaw!==null?'Tải dữ liệu gốc bị lỗi':'Tải bản sao JSON'}</button><button class="btn secondary" data-action="share-backup">${icon('upload')}Lưu / chia sẻ bản sao</button><button class="btn secondary" data-action="import">${icon('upload')}Nhập bản sao JSON</button></div><input id="import-file" type="file" accept=".json,application/json" hidden><p class="helper-text">Nhập bản sao sẽ thay thế sổ hiện tại sau khi xác nhận. Hỗ trợ cả bản sao từ phiên bản cũ.</p>${corruptRaw!==null?`<p class="helper-text">Sổ đang hiển thị có ${state.transactions.length} giao dịch. JSON của sổ này không chứa dữ liệu gốc bị lỗi.</p><button class="btn secondary" data-action="backup-visible">Tải sổ đang hiển thị (JSON)</button>`:''}</div></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Bản phục hồi trên thiết bị</h2></div><div class="card-body"><p>App giữ một trạng thái hợp lệ trước lần lưu gần nhất, để khôi phục khi sửa hoặc xóa nhầm.</p>${recovery?`<div class="backup-status"><span>${timestampLabel(recovery.savedAt)}</span><strong>${recovery.state.transactions.length} giao dịch · ${recovery.state.accounts.length} ví</strong></div><div class="settings-actions"><button class="btn secondary" data-action="download-recovery">${icon('download')}Tải bản phục hồi</button><button class="btn secondary" data-action="restore-recovery">Khôi phục trạng thái này</button></div>`:'<p class="helper-text">Chưa có bản phục hồi. App sẽ tạo bản này khi bạn lưu thay đổi.</p>'}<p class="helper-text">Bản này nằm cùng trình duyệt với sổ, nên không thay thế bản sao JSON bạn tải về.</p></div></section>
-    <section class="card settings-section"><div class="card-header"><h2 class="card-title">Quản lý sổ</h2></div><div class="card-body"><div class="settings-counts"><div><strong>${state.transactions.length}</strong><span>Giao dịch</span></div><div><strong>${state.accounts.length}</strong><span>Ví</span></div><div><strong>${state.goals.length}</strong><span>Mục tiêu</span></div></div><p class="helper-text">${state.demo?'Sổ đang chứa dữ liệu mẫu.':'Sổ cá nhân.'} ${vault.enabled?'Sổ đang mã hóa tại chỗ.':'Sổ chưa mã hóa.'} Đồng bộ đám mây chỉ hoạt động nếu bạn đã tự kết nối GitHub Gist; app không kết nối ngân hàng.</p><div class="settings-actions"><button class="btn danger" data-action="start-fresh">Xóa dữ liệu, tạo sổ mới</button><button class="btn ghost" data-action="load-demo">Nạp dữ liệu mẫu</button></div><p class="helper-text">Money Management · Phiên bản 1.4.0</p></div></section>
+    <section class="card settings-section"><div class="card-header"><h2 class="card-title">Quản lý sổ</h2></div><div class="card-body"><div class="settings-counts"><div><strong>${state.transactions.length}</strong><span>Giao dịch</span></div><div><strong>${state.accounts.length}</strong><span>Ví</span></div><div><strong>${state.goals.length}</strong><span>Mục tiêu</span></div></div><p class="helper-text">${state.demo?'Sổ đang chứa dữ liệu mẫu.':'Sổ cá nhân.'} ${vault.enabled?'Sổ đang mã hóa tại chỗ.':'Sổ chưa mã hóa.'} Đồng bộ Firebase hoặc GitHub Gist là tùy chọn và cần thiết lập riêng; app không kết nối ngân hàng.</p><div class="settings-actions"><button class="btn danger" data-action="start-fresh">Xóa dữ liệu, tạo sổ mới</button><button class="btn ghost" data-action="load-demo">Nạp dữ liệu mẫu</button></div><p class="helper-text">Money Management · Phiên bản 1.5.0</p></div></section>
   </div>`;
 }
 
@@ -767,6 +869,16 @@ function handleAction(event) {
   const actions={
     'enable-vault':enableVault,'backup-encrypted':downloadEncryptedBackup,'lock-vault':()=>location.reload(),
     'cloud-connect':cloudConnect,'cloud-check':()=>cloud.check().then(()=>toast(cloud.status().remoteChanges?'Có thay đổi trên đám mây. Hãy xem và chọn bản cần giữ.':'Đám mây không có thay đổi mới.')),'cloud-pull':cloudPull,'cloud-push':cloudPush,'cloud-disconnect':cloudDisconnect,
+    'firebase-configure':firebaseConfigure,
+    'firebase-login':()=>firebaseLogin(false),'firebase-register':()=>firebaseLogin(true),
+    'firebase-create-cloud':()=>firebaseCloudAction(true),'firebase-connect-cloud':()=>firebaseCloudAction(false),
+    'firebase-use-cloud':firebaseUseCloud,'firebase-keep-local':firebaseKeepLocal,
+    'firebase-check':()=>firebaseAction(()=>firebaseSync.check(),'Đã kiểm tra Firebase.'),
+    'firebase-push':()=>firebaseAction(()=>firebaseSync.localChanged(),'Đã gửi yêu cầu đồng bộ.'),
+    'firebase-logout':()=>firebaseAction(()=>firebaseSync.signOut(),'Đã đăng xuất Firebase trên thiết bị.'),
+    'firebase-disconnect':()=>{
+      if(window.confirm('Ngắt liên kết Firebase trên thiết bị này? Sổ Firebase sẽ không bị xóa.'))void firebaseAction(()=>firebaseSync.disconnect());
+    },
     'decrypt-import':()=>decryptPendingImport(),
     'toggle-theme':()=>{const result=setThemePreference(getResolvedTheme()==='dark'?'light':'dark');if(!result.persisted)toast('Đã đổi giao diện cho phiên này. Trình duyệt chưa cho lưu lựa chọn.',true);},
     'open-menu':()=>setMenu(true),'close-menu':()=>setMenu(false),
@@ -941,8 +1053,9 @@ mobileNavigation.addEventListener('change',()=>{
 window.addEventListener('beforeunload',event=>{if(!updateInProgress&&(savingLedger||formDirty||(profileDraft!==null&&profileDraft!==state.profile.name)||(backups.getStatus().mode==='file'&&backups.getStatus().pendingWrites))){event.preventDefault();event.returnValue='';}});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')backups.flush().catch(()=>{});});
 window.addEventListener('pagehide',()=>{backups.flush().catch(()=>{});});
-window.addEventListener('online',()=>{ if(cloud?.connection)void cloud.check(); });
+window.addEventListener('online',()=>{ if(cloud?.connection)void cloud.check(); if(firebaseSync?.status().configured){if(firebaseSync.status().signedIn)void firebaseSync.resume();else void firebaseSync.start();} });
 window.setInterval(()=>{ if(document.visibilityState==='visible'&&navigator.onLine&&cloud?.connection)void cloud.check(); },180000);
+window.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&navigator.onLine&&firebaseSync?.status().signedIn)void firebaseSync.check(); });
 window.addEventListener('money-management:themechange',()=>{
   const selector=$('#theme-preference');if(selector)selector.value=getThemePreference();
   const toggle=$('.theme-toggle');if(toggle){const label=getResolvedTheme()==='dark'?'Bật chế độ sáng':'Bật chế độ tối';toggle.setAttribute('aria-label',label);toggle.setAttribute('title',label);toggle.innerHTML=icon(getResolvedTheme()==='dark'?'sun':'moon');}
@@ -954,11 +1067,13 @@ backups.init().then(async()=>{
   // Opening a blank or damaged primary must never overwrite the last good file.
   if(!primaryMissingAtBoot&&!storageIssue&&!backupNeedsRecovery)await backups.syncFile(state);
   if(cloud?.connection && navigator.onLine!==false)void cloud.check();
+  if(firebaseSync.status().configured && navigator.onLine!==false)void firebaseSync.start();
 }).catch(()=>{
   backupsReady=true;backupNotice='Sổ có thể tiếp tục lưu trên trình duyệt. Chưa mở được sao lưu tự động; hãy tải một bản JSON trong Cài đặt.';refreshBackupStatus();
 });
 initPwa({beforeUpdate:async()=>{
   await backups.flush();
+  await firebaseSync.flush();
   if((formDirty||(profileDraft!==null&&profileDraft!==state.profile.name))&&!window.confirm('Cập nhật sẽ tải lại app. Bỏ các thay đổi chưa lưu và cập nhật?'))return false;
   updateInProgress=true;
   $('#app').inert=true;$('#modal-root').inert=true;

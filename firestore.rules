@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // One encrypted ledger per Firebase Auth user. No public reads/writes.
+    match /users/{uid}/private/ledger {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+      function validLedger() {
+        return request.resource.data.keys().hasOnly(['version', 'revision', 'envelope', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['version', 'revision', 'envelope', 'updatedAt'])
+          && request.resource.data.version == 1
+          && request.resource.data.revision is int
+          && request.resource.data.envelope is string
+          && request.resource.data.envelope.size() > 40
+          && request.resource.data.envelope.size() <= 780000
+          && request.resource.data.updatedAt is timestamp;
+      }
+      allow get: if isOwner();
+      allow list, delete: if false;
+      allow create: if isOwner() && validLedger() && request.resource.data.revision == 1;
+      allow update: if isOwner() && validLedger()
+        && resource.data.version == 1
+        && request.resource.data.revision == resource.data.revision + 1;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

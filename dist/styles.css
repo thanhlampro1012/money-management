@@ -749,3 +749,26 @@ textarea.form-control { resize: vertical; min-height: 90px; }
 #cloud-settings .settings-actions { gap: 9px; }
 #security-settings p, #cloud-settings p { line-height: 1.6; }
 @media (max-width: 540px) { #security-settings .settings-actions .btn, #cloud-settings .settings-actions .btn { flex: 1 1 100%; justify-content: center; } .vault-unlock-card { padding: 22px; } }
+
+/* Firebase sync setup: concise and touch-friendly on narrow screens. */
+#firebase-settings { min-width: 0; }
+#firebase-settings .card-body { min-width: 0; }
+#firebase-settings :is(p, .helper-text) { line-height: 1.65; overflow-wrap: anywhere; }
+#firebase-settings code { white-space: normal; overflow-wrap: anywhere; }
+#firebase-settings .firebase-config { padding: 13px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+#firebase-settings .firebase-config summary { cursor: pointer; color: var(--heading); font-weight: 650; line-height: 1.5; }
+#firebase-settings .firebase-config p { margin: 12px 0; }
+#firebase-settings .firebase-config label { display: block; margin-bottom: 7px; font-size: .9rem; font-weight: 600; }
+#firebase-settings .firebase-config textarea { width: 100%; min-height: 130px; font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+#firebase-settings .firebase-auth-fields,
+#firebase-settings .firebase-key-fields { display: grid; gap: 12px; margin-top: 17px; padding-top: 16px; border-top: 1px solid var(--border); }
+#firebase-settings h3 { margin: 0; color: var(--heading); font-size: .95rem; }
+#firebase-settings .settings-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+#firebase-settings .settings-actions .btn { min-height: 44px; }
+#firebase-settings .firebase-conflict { border: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger-text); border-radius: 10px; padding: 15px; margin-top: 16px; }
+#firebase-settings .firebase-conflict p { margin-top: 8px; }
+#firebase-settings .form-control { min-height: 46px; }
+@media (max-width: 540px) {
+  #firebase-settings .settings-actions .btn { flex: 1 1 100%; justify-content: center; }
+  #firebase-settings .firebase-config textarea { font-size: 14px; }
+}

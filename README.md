@@ -1,12 +1,14 @@
 # Money Management
 
-**Phiên bản 1.3.0** — ứng dụng ghi chép thu chi cá nhân bằng tiếng Việt, sử dụng Việt Nam đồng (VND). Bản này bổ sung biểu tượng ví trên màn hình chính, mở app ngoại tuyến, sao lưu file sau mỗi thay đổi và lịch sử phục hồi. Ứng dụng chạy trong trình duyệt, không có dependency bên ngoài hoặc bước build.
+**Phiên bản 1.5.0** — sổ thu chi cá nhân bằng tiếng Việt (VND), hỗ trợ giao diện di động/PWA, Excel, sao lưu, khóa sổ AES-256-GCM và tùy chọn đăng nhập + đồng bộ mã hóa giữa các thiết bị bằng Firebase Authentication và Cloud Firestore. Bản website tĩnh vẫn dùng miễn phí trên GitHub Pages; chức năng Firebase chỉ chạy sau khi chủ dự án cấu hình dịch vụ.
 
 [Mở ứng dụng trên GitHub Pages](https://thanhlampro1012.github.io/money-management/) · [Hướng dẫn vận hành](docs/OPERATIONS.md) · [Đối chiếu tính năng và ưu tiên](docs/COMPARISON.md)
 
+**Firebase (mới trong 1.5):** [Thiết lập Firebase project, Authentication và Firestore Rules](docs/FIREBASE-SETUP.md) · [Mã Firestore Rules](firestore.rules) · [Ghi chú phát hành 1.5.0](docs/RELEASE-1.5.0.md). Đăng nhập/đồng bộ chưa hoạt động cho đến khi bạn cung cấp cấu hình Web App và xuất bản quy tắc trên dự án Firebase của mình.
+
 ## Phạm vi sử dụng
 
-Money Management phục vụ **một người quản lý sổ trên một trình duyệt và một địa chỉ website**. Sổ chính lưu trong `localStorage`; lịch sử phục hồi lưu trong IndexedDB trên cùng thiết bị. Bạn chọn thêm cách giữ file JSON riêng trong Cài đặt. App chưa có đăng nhập tài khoản, máy chủ dữ liệu, đồng bộ nhiều thiết bị, mã hóa sổ hoặc kết nối ngân hàng. Chức năng chuyển giữa ví chỉ ghi nhận việc chuyển tiền đã thực hiện, không gọi API chuyển tiền.
+Mặc định, Money Management là **sổ cá nhân lưu tại trình duyệt**, dùng `localStorage` và IndexedDB; dữ liệu không tự chuyển sang một thiết bị khác. Sau khi chủ dự án thiết lập Firebase, người dùng có thể bật khóa sổ, đăng nhập Firebase Authentication, rồi xác nhận đưa bản sổ **đã mã hóa** lên Cloud Firestore để đồng bộ với thiết bị khác. Không dùng GitHub repo làm kho dữ liệu và không kết nối ngân hàng. Firebase cần cấu hình, Security Rules và kết nối mạng; ngoại tuyến vẫn ghi vào máy. Chức năng chuyển giữa ví chỉ ghi nhận việc chuyển tiền đã thực hiện, không gọi API chuyển tiền.
 
 
 ## Tính năng
@@ -148,6 +150,6 @@ Khi nâng cấp tại cùng địa chỉ, giữ nguyên **origin** và khóa lư
 
 ## Phạm vi phát triển tiếp
 
-Phiên bản này ưu tiên ghi sổ trên máy tính/điện thoại, danh mục riêng, lịch định kỳ có xác nhận, báo cáo Excel, dùng ngoại tuyến và khả năng khôi phục. Theo dõi vay/nợ chuyên biệt, sổ dùng chung, đăng nhập để đồng bộ cloud và kết nối ngân hàng chưa nằm trong phạm vi. Xem [đối chiếu và lý do ưu tiên](docs/COMPARISON.md).
+Phiên bản này ưu tiên ghi sổ cá nhân, lịch định kỳ, báo cáo Excel, offline, backup, khóa sổ và đồng bộ Firebase **tùy chọn**. Theo dõi vay/nợ chuyên biệt, chia sẻ sổ cho nhiều tài khoản cùng chỉnh sửa và kết nối ngân hàng chưa hỗ trợ. Xem [đối chiếu](docs/COMPARISON.md) và [hướng dẫn Firebase](docs/FIREBASE-SETUP.md).
 
-Trước khi dùng cho nhiều thiết bị, nhiều người hoặc dữ liệu dùng chung, cần thiết kế máy chủ lưu trữ, xác thực và phân quyền dữ liệu, xử lý xung đột, bảo vệ dữ liệu và quy trình sao lưu phù hợp. Bản hiện tại không được mô tả là sẵn sàng cho những mô hình vận hành đó.
+Đồng bộ Firebase trong 1.5.0 phục vụ **một chủ tài khoản trên nhiều thiết bị**, không phải nhiều tài khoản cùng quản lý một sổ. Nếu hai thiết bị sửa offline, app yêu cầu người dùng chọn bản giữ lại thay vì tự gộp. Việc dùng Firebase thật còn phụ thuộc dự án của chủ sở hữu, Security Rules đã Publish và thử nghiệm thực tế hai thiết bị.
