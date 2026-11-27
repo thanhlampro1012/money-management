@@ -4,11 +4,16 @@ import { LedgerStore } from './storage.js';
 import { makeExcel, EXCEL_MIME, excelFilename } from './export.js';
 import { initTheme, getThemePreference, getResolvedTheme, setThemePreference } from './theme.js';
 import { BackupManager } from './backup.js';
+import { LocalVault, EncryptedBackupRepository, unlockVaultBeforeApp, VAULT_KEY } from './vault.js';
+import { GitHubCloudSync } from './cloud.js';
 import { parseVndAmount, formatVndInput } from './input.js';
 import { initPwa, renderPwaSettings } from './pwa.js';
 
 initTheme();
-const ledger = new LedgerStore();
+const vault = new LocalVault();
+await unlockVaultBeforeApp(vault);
+const secureStorage = vault.adapter;
+let ledger = new LedgerStore(secureStorage);
 const KEY = 'vi-minh:v1';
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -55,11 +60,14 @@ let pendingStorageRefresh = false;
 let profileDraft = null;
 let backupsReady = false, backupNeedsRecovery = false, backupNotice = '';
 let importRequest = 0, dialogRevision = 0, updateInProgress = false;
+let pendingEncryptedImport = null, cloudBusy = false;
 const mobileNavigation = matchMedia('(max-width: 850px)');
 const primaryMissingAtBoot = readPrimaryRaw() === null;
 let state = loadState();
-let backups = null;
+let backups = null, cloud = null;
 backups = new BackupManager({
+  repository: new EncryptedBackupRepository(vault),
+  encryptExternal: raw => vault.enabled ? vault.encryptExport(raw) : JSON.stringify(JSON.parse(raw),null,2),
   getCurrentRaw: readPrimaryRaw,
   getCurrentState: () => {
     const raw = readPrimaryRaw();
@@ -69,9 +77,10 @@ backups = new BackupManager({
   download: (content, filename) => download(content, filename, 'application/json;charset=utf-8'),
   onChange: () => { if (backups) refreshBackupStatus(); },
 });
+cloud = new GitHubCloudSync({ vault, readState: () => state, onChange: () => { if (cloud) refreshCloudStatus(); } });
 
 function readPrimaryRaw() {
-  try { return localStorage.getItem(KEY); } catch { return undefined; }
+  try { return secureStorage.getItem(KEY); } catch { return undefined; }
 }
 
 function loadState() {
@@ -81,7 +90,8 @@ function loadState() {
   return result.state;
 }
 
-function applyStorageRefresh(notify = false) {
+async function applyStorageRefresh(notify = false) {
+  if (vault.enabled) await vault.refresh();
   pendingStorageRefresh = false;
   const latest = ledger.refresh();
   state = latest.state; storageIssue = latest.issue; corruptRaw = latest.corruptRaw;
@@ -94,41 +104,53 @@ function sanitizeFilters() {
   if (ui.categoryId !== 'all' && !category(ui.categoryId)) ui.categoryId = 'all';
 }
 
-function commit(next, { replace = false, reason = 'Cập nhật sổ' } = {}) {
+let savingLedger = false;
+async function commit(next, { replace = false, reason = 'Cập nhật sổ', cloudPush = true } = {}) {
+  if (savingLedger) { toast('Thay đổi trước đang được lưu. Hãy thử lại sau khi hoàn tất.', true); return false; }
   if (!backupsReady) { toast('Đang mở sổ và kiểm tra bản sao. Hãy lưu lại sau một chút.', true); return false; }
   if (backupNeedsRecovery && !replace) { toast('Có lịch sử của sổ trước. Hãy chọn khôi phục hoặc xác nhận dùng sổ trống trong Cài đặt trước khi ghi tiếp.', true); return false; }
+  savingLedger = true;
   const previous = JSON.stringify(state);
   let previousPersistedState = null;
-  try { const raw=readPrimaryRaw(); if(typeof raw==='string')previousPersistedState=validateState(JSON.parse(raw)); } catch { /* Preserve broken primary bytes through the existing recovery flow. */ }
+  try { const raw = readPrimaryRaw(); if (typeof raw === 'string') previousPersistedState = validateState(JSON.parse(raw)); } catch { /* Guard corrupt prior revisions. */ }
   try {
     state = ledger.save(next, { replace });
+    // In encrypted mode LedgerStore writes into an in-memory adapter. Do not
+    // report success until WebCrypto has encrypted and committed the revision.
+    if (vault.enabled) await vault.flush();
     storageIssue = ''; corruptRaw = null;
     if (replace) { profileDraft = null; backupNeedsRecovery = false; }
   } catch (error) {
+    if (vault.enabled) {
+      vault.rollback();
+      try { if (error.code === 'CONFLICT') await vault.refresh(); } catch (refreshError) { storageIssue = refreshError.message; }
+      ledger = new LedgerStore(secureStorage);
+      const snapshot = ledger.load(); state = snapshot.state;
+      storageIssue = storageIssue || snapshot.issue;
+      corruptRaw = snapshot.corruptRaw;
+    }
     if (error.code === 'CONFLICT') {
       pendingStorageRefresh = false;
-      // Refresh the ledger, but keep the independent modal and its draft.
-      // A retry rebuilds the mutation from the new state and revalidates IDs.
-      applyStorageRefresh();
-      refreshDraftChoices();
+      if (!vault.enabled) await applyStorageRefresh();
+      render(); refreshDraftChoices();
       const fieldError = $('#modal-error');
       if (fieldError) fieldError.textContent = 'Sổ vừa thay đổi ở tab khác. Nội dung bạn nhập vẫn được giữ. Kiểm tra lại biểu mẫu rồi bấm Lưu để áp dụng vào sổ mới nhất.';
     } else if (error.code) {
-      storageIssue = error.message;
-      render();
+      storageIssue = error.message; render();
     }
     toast(error.message || 'Không lưu được thay đổi. Dữ liệu hiện tại vẫn được giữ.', true);
+    savingLedger = false;
     return false;
   }
+  savingLedger = false;
   if (JSON.stringify(state) !== previous) {
     try {
-      // On the first edit after upgrade, preserve the ledger from before that
-      // edit too. History-only must never write an old state to the chosen file.
-      if(previousPersistedState)backups.record(previousPersistedState,'Trước khi thay đổi sổ',{historyOnly:true}).catch(()=>{});
+      if (previousPersistedState) backups.record(previousPersistedState, 'Trước khi thay đổi sổ', {historyOnly:true}).catch(()=>{});
       Promise.resolve(backups.record(state, reason)).catch(() => {
         backupNotice = 'Sổ đã lưu trên trình duyệt, nhưng bản sao tự động chưa hoàn tất. Mở Cài đặt để kiểm tra hoặc tải JSON.';
         refreshBackupStatus();
       });
+      if (cloudPush && cloud?.connection) void cloud.push(state);
     } catch {
       backupNotice = 'Sổ đã lưu trên trình duyệt. Hãy kiểm tra lại sao lưu tự động trong Cài đặt.';
     }
@@ -349,7 +371,7 @@ function postRecurringModal(id) {
 
 function skipRecurring(id) {
   const r=state.recurring.find(item=>item.id===id);if(!r||!r.active)return;
-  confirmModal('Bỏ qua kỳ này?',`<p>Bỏ kỳ <strong>${dateLabel(r.nextDate)}</strong> của <strong>${esc(r.note||category(r.categoryId)?.name)}</strong> và chuyển sang kỳ kế tiếp.</p><p>Không tạo giao dịch và không thay đổi số dư.</p>`,()=>{try{if(commit(skipRecurringOccurrence(state,id,r.nextDate))){closeModal(true);toast('Đã bỏ qua một kỳ.');}}catch(error){toast(error.message,true);}},'Bỏ kỳ này');
+  confirmModal('Bỏ qua kỳ này?',`<p>Bỏ kỳ <strong>${dateLabel(r.nextDate)}</strong> của <strong>${esc(r.note||category(r.categoryId)?.name)}</strong> và chuyển sang kỳ kế tiếp.</p><p>Không tạo giao dịch và không thay đổi số dư.</p>`,async()=>{try{if(await commit(skipRecurringOccurrence(state,id,r.nextDate))){closeModal(true);toast('Đã bỏ qua một kỳ.');}}catch(error){toast(error.message,true);}},'Bỏ kỳ này');
 }
 
 function exportWorkbook(monthOnly=false) {
@@ -383,7 +405,8 @@ function saveStatusMarkup() {
 function backupAttentionMarkup() {
   const s = backups?.getStatus();
   if (backupNeedsRecovery) return `<div class="storage-warning" role="alert">${icon('info')}<span>Bản lưu chính không còn, nhưng vẫn có lịch sử của sổ trước. Hãy kiểm tra bản phục hồi trước khi ghi tiếp.</span><a href="#settings">Khôi phục sổ</a></div>`;
-  const issue = backupNotice || s?.historyIssue || (s?.mode === 'file' && ['error','needs-permission'].includes(s.fileState) ? s.fileIssue : '') || s?.downloadIssue;
+  const cloudIssue = cloud?.status()?.remoteChanges ? 'Bản sao trên GitHub đã thay đổi. Đã tạm dừng tự đồng bộ; hãy xem mục Đám mây trong Cài đặt.' : '';
+  const issue = cloudIssue || backupNotice || s?.historyIssue || (s?.mode === 'file' && ['error','needs-permission'].includes(s.fileState) ? s.fileIssue : '') || s?.downloadIssue;
   if (issue) return `<div class="storage-warning" role="status">${icon('info')}<span>${esc(issue)}</span><a href="#settings">Kiểm tra sao lưu</a></div>`;
   if (backupsReady && s?.mode === 'off' && state.transactions.length && ui.route !== 'settings') return `<div class="backup-reminder">${icon('shield')}<span>Đã lưu trên trình duyệt. Chọn cách sao lưu file để giữ một bản riêng.</span><a href="#settings">Thiết lập sao lưu</a></div>`;
   return '';
@@ -393,7 +416,7 @@ function autoBackupMarkup() {
   const s = backups?.getStatus();
   if (!s?.initialized) return '<p class="helper-text" role="status">Đang kiểm tra các bản sao trên thiết bị…</p>';
   const fileLabels = {unconfigured:'Chưa chọn file',ready:'Đang tự động cập nhật',writing:'Đang ghi bản mới', 'needs-permission':'Cần cho phép ghi lại',error:'File chưa được cập nhật',paused:'Đã tạm ngừng ghi file'};
-  return `<p>Mỗi lần bấm Lưu, sổ được ghi ngay trên trình duyệt. Chọn thêm một cách sao lưu bên dưới để giữ file JSON riêng.</p>
+  return `<p>Mỗi lần bấm Lưu, sổ được ghi trên trình duyệt. Khi bật khóa sổ, file tự cập nhật cũng được mã hóa; bản tải JSON thủ công vẫn không mã hóa trừ khi chọn Tải bản sao mã hóa.</p>
     ${backupNeedsRecovery?`<div class="backup-recovery-callout"><strong>Tìm thấy ${s.snapshotCount} bản phục hồi của sổ trước</strong><p>Hãy xem lịch sử để khôi phục dữ liệu. Chỉ dùng sổ trống nếu bạn muốn bắt đầu lại.</p><div class="settings-actions"><button class="btn primary" data-action="backup-history">Xem lịch sử</button><button class="btn secondary" data-action="continue-empty">Dùng sổ trống</button></div></div>`:''}
     <div class="backup-option"><h3>File JSON tự cập nhật</h3>
       ${s.fileSupported?`<p>Chọn nơi lưu một lần. Sau mỗi thay đổi, app cập nhật file này khi còn quyền ghi. Giữ app mở đến khi hiện “Đã sao lưu file”.</p><div class="backup-status"><span>${fileLabels[s.fileState]||'Kiểm tra liên kết file'}</span><strong>${esc(s.fileName||'Chưa thiết lập')}</strong></div><div class="settings-actions"><button class="btn ${s.fileName?'secondary':'primary'}" data-action="choose-backup-file">${icon('download')}${s.fileName?'Đổi file':'Chọn file sao lưu'}</button>${s.fileName?`<button class="btn secondary" data-action="resume-backup-file">${s.filePermission==='granted'&&s.mode==='file'?'Cập nhật file ngay':'Cho phép ghi file'}</button><button class="btn ghost" data-action="disconnect-backup-file">Ngừng liên kết</button>`:''}</div><p class="helper-text">Ghi file thành công gần nhất: <strong>${backupTime(s.lastFileWriteAt)}</strong>.</p>`:'<p>Trình duyệt này chưa cho phép app tự ghi đè một file đã chọn. Bạn có thể dùng chế độ tải từng bản JSON bên dưới, hoặc lưu/chia sẻ bản sao vào ứng dụng Tệp.</p>'}
@@ -447,8 +470,8 @@ async function useSnapshot(id, restore = false) {
       download(JSON.stringify(entry.state,null,2),`money-management-history-${entry.savedAt.replace(/[:.]/g,'-')}.json`,'application/json;charset=utf-8');
       toast('Đã yêu cầu tải JSON. Kiểm tra mục tải xuống.'); return;
     }
-    confirmModal('Khôi phục bản đã chọn?',`<p>Bản lúc <strong>${backupTime(entry.savedAt)}</strong> có <strong>${entry.state.transactions.length} giao dịch</strong> và <strong>${entry.state.accounts.length} ví</strong>.</p><p>Sổ hiện tại sẽ được thay thế. Bạn có thể tải bản sao hiện tại trước khi tiếp tục.</p>`,()=>{
-      if (commit(entry.state,{replace:true,reason:'Khôi phục từ lịch sử'})) {closeModal(true);resetFilters();render();toast('Đã khôi phục sổ.');}
+    confirmModal('Khôi phục bản đã chọn?',`<p>Bản lúc <strong>${backupTime(entry.savedAt)}</strong> có <strong>${entry.state.transactions.length} giao dịch</strong> và <strong>${entry.state.accounts.length} ví</strong>.</p><p>Sổ hiện tại sẽ được thay thế. Bạn có thể tải bản sao hiện tại trước khi tiếp tục.</p>`,async()=>{
+      if (await commit(entry.state,{replace:true,reason:'Khôi phục từ lịch sử'})) {closeModal(true);resetFilters();render();toast('Đã khôi phục sổ.');}
     },'Khôi phục sổ',true);
   } catch(error) {toast(error.message,true);}
 }
@@ -464,6 +487,93 @@ async function shareBackup() {
   } catch(error) {if(error?.name!=='AbortError')toast('Chưa chia sẻ được bản sao. Bạn có thể dùng nút Tải bản sao JSON.',true);}
 }
 
+function securityMarkup() {
+  return `<section class="card settings-section" id="security-settings"><div class="card-header"><h2 class="card-title">Mã hóa dữ liệu trên thiết bị</h2></div><div class="card-body">
+    ${vault.enabled
+      ? `<p><strong>Đang bật mã hóa AES-256-GCM.</strong> Sổ chính và lịch sử phục hồi được mã hóa trước khi lưu vào trình duyệt. Bạn cần mật khẩu mỗi khi mở phiên mới.</p><p class="helper-text">Mật khẩu không thể khôi phục nếu quên. Các bản JSON đã tải trước đó vẫn là dữ liệu không mã hóa. File JSON tự cập nhật từ phiên bản này được mã hóa nếu chế độ khóa sổ đang bật; hãy giữ mật khẩu để nhập lại.</p><div class="settings-actions"><button class="btn secondary" data-action="backup-encrypted">Tải bản sao mã hóa</button><button class="btn ghost" data-action="lock-vault">Khóa ứng dụng</button></div>`
+      : `<p>Khóa sổ bằng mật khẩu riêng, mã hóa dữ liệu tài chính lưu trong trình duyệt và lịch sử phục hồi. Hãy giữ một bản JSON ở nơi riêng trước khi bật; quên mật khẩu sẽ không giải mã được.</p><div class="form-group"><label for="vault-new-password">Mật khẩu mã hóa (ít nhất 12 ký tự)</label><input id="vault-new-password" class="form-control" type="password" autocomplete="new-password" minlength="12" placeholder="Nhập mật khẩu riêng"></div><div class="form-group"><label for="vault-confirm-password">Nhập lại mật khẩu</label><input id="vault-confirm-password" class="form-control" type="password" autocomplete="new-password" minlength="12" placeholder="Xác nhận mật khẩu"></div><button class="btn primary" data-action="enable-vault">Bật mã hóa sổ</button>`}
+  </div></section>`;
+}
+function cloudMarkup() {
+  const c = cloud.status();
+  return `<section class="card settings-section" id="cloud-settings"><div class="card-header"><h2 class="card-title">Sao lưu và đồng bộ qua GitHub</h2></div><div class="card-body" id="cloud-status-content">
+    <p>Đồng bộ một <strong>Gist chứa dữ liệu mã hóa</strong>, không đưa giao dịch vào repository Public. Cần bạn cấp quyền Gist bằng mã truy cập GitHub; chỉ lưu mã này bên trong sổ đã khóa.</p>
+    ${!vault.enabled ? `<p class="helper-text">Hãy bật mã hóa dữ liệu trên thiết bị ở mục bên trên trước khi kết nối đám mây.</p>`
+      : c.connected
+        ? `<div class="backup-status"><span>Trạng thái đám mây</span><strong>${c.remoteChanges?'Có phiên bản mới cần xử lý':c.status==='syncing'?'Đang đồng bộ':c.status==='offline'?'Chưa có mạng':c.status==='error'?'Có lỗi đồng bộ':'Đã kết nối'}</strong></div><p class="helper-text">Gist ID: <code>${esc(c.gistId)}</code>. Lần đồng bộ hoàn thành: ${backupTime(c.lastSyncedAt)}. Sau mỗi lần lưu, app tự thử sao lưu khi có mạng.</p>${c.error?`<p class="field-error" role="status">${esc(c.error)}</p>`:''}
+           <div class="settings-actions"><button class="btn secondary" data-action="cloud-check">Kiểm tra bản đám mây</button><button class="btn primary" data-action="cloud-pull">Xem & khôi phục bản đám mây</button><button class="btn secondary" data-action="cloud-push" ${c.remoteChanges?'disabled':''}>Sao lưu lên GitHub ngay</button><button class="btn ghost" data-action="cloud-disconnect">Ngắt kết nối</button></div><p class="helper-text">Trên thiết bị khác, bật mã hóa rồi dùng Gist ID ở trên để kết nối. Khi thấy dữ liệu khác nhau, app dừng ghi đè để bạn chọn bản cần giữ.</p>`
+        : `<div class="form-group"><label for="cloud-token">Mã truy cập GitHub (quyền Gists: Read and write)</label><input id="cloud-token" type="password" class="form-control" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></div><div class="form-group"><label for="cloud-password">Mật khẩu dành cho bản sao đám mây (ít nhất 12 ký tự)</label><input id="cloud-password" type="password" class="form-control" autocomplete="new-password" minlength="12" placeholder="Không gửi mật khẩu trong chat"></div><div class="form-group"><label for="cloud-gist-id">Gist ID hoặc URL (bỏ trống để tạo mới)</label><input id="cloud-gist-id" class="form-control" autocomplete="off" spellcheck="false" placeholder="Dán ID Gist nếu kết nối thiết bị thứ hai"></div><div class="settings-actions"><button class="btn primary" data-action="cloud-connect">${icon('shield')}Kết nối / tạo bản sao đám mây</button></div><p class="helper-text">Tạo mã có quyền <strong>Gists: Read and write</strong> tại <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">GitHub Personal Access Tokens</a>. Không dùng mật khẩu GitHub. Mã chỉ có hiệu lực với các quyền bạn cấp; Gist không công khai danh sách nhưng ai biết URL vẫn có thể truy cập nội dung mã hóa.</p>`}
+    <p class="helper-text">Đồng bộ chạy khi ứng dụng mở và có mạng; không thể đảm bảo hai thiết bị sửa cùng lúc không xung đột. Không chia sẻ mã truy cập/mật khẩu; giữ thêm bản sao JSON độc lập.</p>
+  </div></section>`;
+}
+function refreshCloudStatus() {
+  const panel = $('#cloud-settings');
+  if (panel && !panel.contains(document.activeElement)) panel.outerHTML = cloudMarkup();
+  const attention = $('#backup-attention'); if (attention) attention.innerHTML = backupAttentionMarkup();
+}
+async function enableVault() {
+  if (cloudBusy || savingLedger || !backupsReady || backupNeedsRecovery || storageIssue) { toast('Hãy hoàn tất lưu và khôi phục sổ trước khi bật mã hóa.',true);return; }
+  const password=$('#vault-new-password')?.value || '', confirm=$('#vault-confirm-password')?.value || '';
+  if (password.length<12 || password!==confirm) {toast('Mật khẩu phải có ít nhất 12 ký tự và hai lần nhập phải trùng nhau.',true);return;}
+  if (!window.confirm('Mã hóa sổ đang sử dụng? Nếu quên mật khẩu, bạn sẽ không thể mở lại sổ. Hãy lưu bản sao JSON trước khi tiếp tục.')) return;
+  cloudBusy=true;
+  try {
+    await backups.flush();
+    const downloadBeforeEncryption = backups.getStatus().downloadEnabled;
+    await vault.enable(password);
+    // Automatic browser downloads cannot reliably preserve user activation after
+    // asynchronous AES encryption. Stop exporting plaintext per edit silently.
+    if (downloadBeforeEncryption) { backups.setDownloadMode(false); backupNotice = 'Đã tắt tải JSON tự động không mã hóa. Hãy dùng Tải bản sao mã hóa hoặc file tự cập nhật để giữ dữ liệu riêng.'; }
+    // Re-encrypt old IndexedDB snapshots; avoid leaving recoverable cleartext history.
+    try { await backups.repository.migratePlaintext(); }
+    catch { backupNotice='Sổ chính đã mã hóa nhưng chưa hoàn tất mã hóa lịch sử cũ. Hãy xuất bản sao, kiểm tra lịch sử và mở lại ứng dụng.'; }
+    toast('Đã bật mã hóa sổ. Hãy ghi nhớ mật khẩu và giữ thêm một bản sao mã hóa.');
+    render();
+  } catch(error) {toast(error.message || 'Chưa bật được mã hóa. Sổ vẫn được giữ nguyên.',true);}
+  finally {cloudBusy=false;}
+}
+async function downloadEncryptedBackup() {
+  try { const text=await vault.encryptExport(JSON.stringify(state)); download(text,`money-management-encrypted-${localDate()}.json`,'application/json');toast('Đã tạo bản JSON mã hóa. Kiểm tra thư mục Tải xuống.'); }
+  catch(error){toast(error.message,true);}
+}
+async function cloudConnect() {
+  if (cloudBusy || !vault.enabled) {toast('Hãy bật mã hóa trên thiết bị trước.',true);return;}
+  const token=$('#cloud-token')?.value.trim(), password=$('#cloud-password')?.value || '', gist=$('#cloud-gist-id')?.value.trim();
+  if(!token || !password || password.length<12){toast('Cần mã truy cập GitHub và mật khẩu đám mây ít nhất 12 ký tự.',true);return;}
+  cloudBusy=true;
+  try {
+    if(gist){await cloud.connect(token,gist,password);toast('Đã kết nối. Hãy chọn Xem & khôi phục để nhận dữ liệu từ thiết bị trước.');}
+    else {await cloud.create(token,password,state);toast('Đã tạo Gist mã hóa. Lưu lại Gist ID để dùng trên thiết bị khác.');}
+    render();
+  } catch(error){toast(error.message||'Kết nối GitHub không thành công.',true);}
+  finally{cloudBusy=false;}
+}
+async function cloudPull() {
+  if(cloudBusy||!cloud.connection)return;
+  cloudBusy=true;
+  try {
+    await cloud.check();
+    let latest=cloud.peekRemote();
+    if(!latest){toast('Đám mây đang cùng phiên bản mà thiết bị đã đồng bộ.');return;}
+    confirmModal('Nhận sổ từ đám mây?',`<p>Bản đám mây có <strong>${latest.state.transactions.length} giao dịch</strong>, <strong>${latest.state.accounts.length} ví</strong> và <strong>${latest.state.goals.length} mục tiêu</strong>.</p><p>Thao tác này <strong>thay sổ đang mở</strong>, không gộp giao dịch. Hãy tải bản sao hiện tại để phòng mất những thay đổi mới trên thiết bị.</p>`,async()=>{
+      if(await commit(latest.state,{replace:true,reason:'Nhận sổ từ GitHub Gist',cloudPush:false})){
+        try{await cloud.acknowledgePull(latest.revision);closeModal(true);resetFilters();render();toast('Đã nhận bản đám mây.');}
+        catch(error){toast(`Sổ đã nhận nhưng chưa ghi nhớ phiên bản đám mây: ${error.message}`,true);}
+      }
+    },'Thay bằng bản đám mây',true);
+  }catch(error){toast(error.message||'Không đọc được bản đám mây.',true);}
+  finally{cloudBusy=false;}
+}
+async function cloudPush() {
+  if(!cloud.connection)return;
+  const okay=await cloud.push(state);
+  if(okay)toast('Đã sao lưu dữ liệu mã hóa lên GitHub.');else toast(cloud.status().error||'Chưa đồng bộ. Kiểm tra mục Đám mây.',true);
+}
+async function cloudDisconnect() {
+  if(!window.confirm('Ngắt liên kết GitHub khỏi thiết bị này? Gist mã hóa trên GitHub sẽ vẫn được giữ.'))return;
+  try{await cloud.disconnect();render();toast('Đã ngắt liên kết.');}catch(error){toast(error.message,true);}
+}
+
 function renderSettings() {
   const recovery = ledger.getRecovery();
   const lastBackup = ledger.lastBackupAt();
@@ -471,11 +581,13 @@ function renderSettings() {
   <div class="settings-grid">
     <section class="card settings-section backup-settings"><div class="card-header"><h2 class="card-title">Sao lưu tự động</h2></div><div class="card-body" id="automatic-backup-content">${autoBackupMarkup()}</div></section>
     ${renderPwaSettings()}
+    ${securityMarkup()}
+    ${cloudMarkup()}
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Giao diện</h2></div><div class="card-body"><div class="form-group"><label for="theme-preference">Chế độ hiển thị</label><select id="theme-preference" class="form-control">${[['system','Theo hệ thống'],['light','Sáng'],['dark','Tối']].map(([value,label])=>`<option value="${value}" ${getThemePreference()===value?'selected':''}>${label}</option>`).join('')}</select></div><p class="helper-text">Lựa chọn được nhớ trên trình duyệt này. Bạn cũng có thể đổi nhanh bằng nút ở góc trên.</p></div></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Thông tin cá nhân</h2></div><form id="profile-form" class="card-body"><div class="form-group"><label for="profile-name">Tên hiển thị</label><input id="profile-name" class="form-control" name="name" value="${esc(profileDraft ?? state.profile.name)}" required maxlength="60"></div><div class="form-group"><label for="currency">Đơn vị tiền tệ</label><input id="currency" class="form-control" value="Việt Nam đồng (VND)" disabled></div><button class="btn primary" type="submit">Lưu thay đổi</button><button class="btn ghost" type="button" data-action="discard-profile-draft">Hủy sửa tên</button></form></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Sao lưu & khôi phục</h2></div><div class="card-body"><p>Sổ được lưu trên trình duyệt này. Tải bản sao JSON để giữ dữ liệu khi đổi thiết bị, đổi địa chỉ website hoặc xóa dữ liệu duyệt web.</p><div class="backup-status"><span>Lần xuất gần nhất</span><strong>${timestampLabel(lastBackup)}</strong></div><div class="settings-actions"><button class="btn secondary" data-action="backup">${icon('download')}${corruptRaw!==null?'Tải dữ liệu gốc bị lỗi':'Tải bản sao JSON'}</button><button class="btn secondary" data-action="share-backup">${icon('upload')}Lưu / chia sẻ bản sao</button><button class="btn secondary" data-action="import">${icon('upload')}Nhập bản sao JSON</button></div><input id="import-file" type="file" accept=".json,application/json" hidden><p class="helper-text">Nhập bản sao sẽ thay thế sổ hiện tại sau khi xác nhận. Hỗ trợ cả bản sao từ phiên bản cũ.</p>${corruptRaw!==null?`<p class="helper-text">Sổ đang hiển thị có ${state.transactions.length} giao dịch. JSON của sổ này không chứa dữ liệu gốc bị lỗi.</p><button class="btn secondary" data-action="backup-visible">Tải sổ đang hiển thị (JSON)</button>`:''}</div></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Bản phục hồi trên thiết bị</h2></div><div class="card-body"><p>App giữ một trạng thái hợp lệ trước lần lưu gần nhất, để khôi phục khi sửa hoặc xóa nhầm.</p>${recovery?`<div class="backup-status"><span>${timestampLabel(recovery.savedAt)}</span><strong>${recovery.state.transactions.length} giao dịch · ${recovery.state.accounts.length} ví</strong></div><div class="settings-actions"><button class="btn secondary" data-action="download-recovery">${icon('download')}Tải bản phục hồi</button><button class="btn secondary" data-action="restore-recovery">Khôi phục trạng thái này</button></div>`:'<p class="helper-text">Chưa có bản phục hồi. App sẽ tạo bản này khi bạn lưu thay đổi.</p>'}<p class="helper-text">Bản này nằm cùng trình duyệt với sổ, nên không thay thế bản sao JSON bạn tải về.</p></div></section>
-    <section class="card settings-section"><div class="card-header"><h2 class="card-title">Quản lý sổ</h2></div><div class="card-body"><div class="settings-counts"><div><strong>${state.transactions.length}</strong><span>Giao dịch</span></div><div><strong>${state.accounts.length}</strong><span>Ví</span></div><div><strong>${state.goals.length}</strong><span>Mục tiêu</span></div></div><p class="helper-text">${state.demo?'Sổ đang chứa dữ liệu mẫu.':'Sổ cá nhân.'} Chưa đồng bộ giữa các thiết bị. Dữ liệu trên thiết bị không được mã hóa; app không kết nối ngân hàng.</p><div class="settings-actions"><button class="btn danger" data-action="start-fresh">Xóa dữ liệu, tạo sổ mới</button><button class="btn ghost" data-action="load-demo">Nạp dữ liệu mẫu</button></div><p class="helper-text">Money Management · Phiên bản 1.3.0</p></div></section>
+    <section class="card settings-section"><div class="card-header"><h2 class="card-title">Quản lý sổ</h2></div><div class="card-body"><div class="settings-counts"><div><strong>${state.transactions.length}</strong><span>Giao dịch</span></div><div><strong>${state.accounts.length}</strong><span>Ví</span></div><div><strong>${state.goals.length}</strong><span>Mục tiêu</span></div></div><p class="helper-text">${state.demo?'Sổ đang chứa dữ liệu mẫu.':'Sổ cá nhân.'} ${vault.enabled?'Sổ đang mã hóa tại chỗ.':'Sổ chưa mã hóa.'} Đồng bộ đám mây chỉ hoạt động nếu bạn đã tự kết nối GitHub Gist; app không kết nối ngân hàng.</p><div class="settings-actions"><button class="btn danger" data-action="start-fresh">Xóa dữ liệu, tạo sổ mới</button><button class="btn ghost" data-action="load-demo">Nạp dữ liệu mẫu</button></div><p class="helper-text">Money Management · Phiên bản 1.4.0</p></div></section>
   </div>`;
 }
 
@@ -578,7 +690,7 @@ function removeRecord(kind,id) {
   if(kind==='customCategories'&&(state.transactions.some(t=>t.categoryId===id)||state.budgets.some(b=>b.categoryId===id)||state.recurring.some(r=>r.categoryId===id))){toast('Danh mục đang được sử dụng. Hãy chuyển các giao dịch, ngân sách và khoản định kỳ sang danh mục khác trước khi xóa.',true);return;}
   const names={transactions:'giao dịch',budgets:'ngân sách',goals:'mục tiêu',accounts:'ví',customCategories:'danh mục',recurring:'khoản định kỳ'};
   const label=record.name||record.note||category(record.categoryId)?.name||names[kind];
-  confirmModal(`Xóa ${names[kind]}?`,`<p>Bạn muốn xóa <strong>${esc(label)}</strong>?</p><p>${kind==='transactions'?'Số dư ví, ngân sách và báo cáo sẽ được cập nhật ngay.':'Các giao dịch đã ghi vẫn được giữ.'}</p>`,()=>{const next=clone();next[kind]=next[kind].filter(x=>x.id!==id);if(commit(next,{reason:`Xóa ${names[kind]}`})){closeModal();toast(`Đã xóa ${names[kind]}.`);}},'Xóa');
+  confirmModal(`Xóa ${names[kind]}?`,`<p>Bạn muốn xóa <strong>${esc(label)}</strong>?</p><p>${kind==='transactions'?'Số dư ví, ngân sách và báo cáo sẽ được cập nhật ngay.':'Các giao dịch đã ghi vẫn được giữ.'}</p>`,async()=>{const next=clone();next[kind]=next[kind].filter(x=>x.id!==id);if(await commit(next,{reason:`Xóa ${names[kind]}`})){closeModal();toast(`Đã xóa ${names[kind]}.`);}},'Xóa');
 }
 
 function download(content,name,type) {
@@ -599,24 +711,42 @@ function backup() {
 function restoreRecovery() {
   const recovery = ledger.getRecovery();
   if (!recovery) { toast('Không có bản phục hồi hợp lệ.', true); return; }
-  confirmModal('Khôi phục trạng thái trước?',`<p>Bản phục hồi lúc <strong>${timestampLabel(recovery.savedAt)}</strong> có <strong>${recovery.state.transactions.length} giao dịch</strong>.</p><p>Sổ hiện tại sẽ được thay thế bằng trạng thái này.</p>`,()=>{
-    if (commit(recovery.state,{replace:true,reason:'Khôi phục trạng thái trước'})) { closeModal(true); resetFilters(); render(); toast('Đã khôi phục trạng thái trước.'); }
+  confirmModal('Khôi phục trạng thái trước?',`<p>Bản phục hồi lúc <strong>${timestampLabel(recovery.savedAt)}</strong> có <strong>${recovery.state.transactions.length} giao dịch</strong>.</p><p>Sổ hiện tại sẽ được thay thế bằng trạng thái này.</p>`,async()=>{
+    if (await commit(recovery.state,{replace:true,reason:'Khôi phục trạng thái trước'})) { closeModal(true); resetFilters(); render(); toast('Đã khôi phục trạng thái trước.'); }
   },'Khôi phục',true);
+}
+function confirmImportedState(imported) {
+  confirmModal('Khôi phục sổ từ bản sao lưu?',`<p>Bản sao có <strong>${imported.transactions.length} giao dịch</strong>, <strong>${imported.accounts.length} ví</strong> và <strong>${imported.goals.length} mục tiêu</strong>, <strong>${imported.customCategories.length} danh mục tự tạo</strong> và <strong>${imported.recurring.length} khoản định kỳ</strong>.</p><p>Sổ hiện tại sẽ được thay thế hoàn toàn. Bạn có thể tải bản sao hiện tại trước khi tiếp tục.</p>`,async()=>{if(await commit(imported,{replace:true,reason:'Nhập bản sao JSON'})){closeModal();resetFilters();render();toast('Đã khôi phục dữ liệu thành công.');}},'Khôi phục dữ liệu',true);
+}
+async function decryptPendingImport() {
+  const password=$('#encrypted-import-password')?.value||'';
+  if(!pendingEncryptedImport)return;
+  try{
+    const raw=await vault.decryptExport(pendingEncryptedImport,password);
+    const parsed=validateState(JSON.parse(raw));
+    pendingEncryptedImport=null;
+    confirmImportedState(parsed);
+  }catch(error){const field=$('#encrypted-import-error');if(field)field.textContent=error.message;}
 }
 async function readImport(file) {
   if(!file)return;
   if(file.size>15*1024*1024){toast('Tệp lớn hơn 15 MB. Hãy chọn một bản sao lưu Money Management phù hợp.',true);return;}
   const request=++importRequest, revision=dialogRevision;
   try {
-    const imported=validateState(JSON.parse((await file.text()).replace(/^\uFEFF/,'')));
+    const data=JSON.parse((await file.text()).replace(/^\uFEFF/,''));
     if(request!==importRequest)return;
     if(dialogRevision!==revision||formDirty){toast('Bạn đang thao tác ở biểu mẫu khác. Hãy hoàn tất hoặc đóng biểu mẫu rồi chọn lại file JSON.',true);return;}
-    confirmModal('Khôi phục sổ từ bản sao lưu?',`<p>Bản sao có <strong>${imported.transactions.length} giao dịch</strong>, <strong>${imported.accounts.length} ví</strong> và <strong>${imported.goals.length} mục tiêu</strong>, <strong>${imported.customCategories.length} danh mục tự tạo</strong> và <strong>${imported.recurring.length} khoản định kỳ</strong>.</p><p>Sổ hiện tại sẽ được thay thế hoàn toàn. Bạn có thể tải bản sao hiện tại trước khi tiếp tục.</p>`,()=>{if(commit(imported,{replace:true,reason:'Nhập bản sao JSON'})){closeModal();resetFilters();render();toast('Đã khôi phục dữ liệu thành công.');}},'Khôi phục dữ liệu',true);
+    if(data?.format==='money-management-export-encrypted-v1'){
+      pendingEncryptedImport=data;
+      openModal('Mở bản sao JSON mã hóa',`<p class="modal-intro">Nhập mật khẩu đã dùng khi tạo bản sao. Không gửi mật khẩu trong chat.</p><div class="form-group"><label for="encrypted-import-password">Mật khẩu giải mã</label><input id="encrypted-import-password" type="password" autocomplete="off" class="form-control"></div><p id="encrypted-import-error" class="field-error" role="alert"></p><button class="btn primary" data-action="decrypt-import">Mở bản sao</button>`);
+      return;
+    }
+    confirmImportedState(validateState(data));
   } catch(error) {toast(`Không thể nhập bản sao: ${error.message||'Tệp JSON không hợp lệ.'}`,true);}
 }
 
 function freshBook(demo=false) {
-  confirmModal(demo?'Nạp dữ liệu minh họa?':'Bắt đầu một sổ mới?',`<p>${demo?'Thay sổ hiện tại bằng một bộ thu chi minh họa để khám phá app.':'Xóa sổ hiện tại, gồm ví, giao dịch, ngân sách, mục tiêu, danh mục tự tạo và khoản định kỳ.'}</p><p>Hãy tải bản sao nếu bạn muốn giữ lại dữ liệu đang có.</p>`,()=>{const next=demo?createDemoState():createEmptyState();next.profile={...state.profile};if(commit(next,{replace:true,reason:demo?'Nạp dữ liệu mẫu':'Tạo sổ mới'})){closeModal();ui.month=monthKey(localDate());resetFilters();location.hash=demo?'overview':'wallets';render();toast(demo?'Đã nạp dữ liệu mẫu.':'Đã tạo sổ mới. Nhập số dư ban đầu tại mục Ví của tôi.');}},demo?'Nạp dữ liệu mẫu':'Bắt đầu sổ mới',true);
+  confirmModal(demo?'Nạp dữ liệu minh họa?':'Bắt đầu một sổ mới?',`<p>${demo?'Thay sổ hiện tại bằng một bộ thu chi minh họa để khám phá app.':'Xóa sổ hiện tại, gồm ví, giao dịch, ngân sách, mục tiêu, danh mục tự tạo và khoản định kỳ.'}</p><p>Hãy tải bản sao nếu bạn muốn giữ lại dữ liệu đang có.</p>`,async()=>{const next=demo?createDemoState():createEmptyState();next.profile={...state.profile};if(await commit(next,{replace:true,reason:demo?'Nạp dữ liệu mẫu':'Tạo sổ mới'})){closeModal();ui.month=monthKey(localDate());resetFilters();location.hash=demo?'overview':'wallets';render();toast(demo?'Đã nạp dữ liệu mẫu.':'Đã tạo sổ mới. Nhập số dư ban đầu tại mục Ví của tôi.');}},demo?'Nạp dữ liệu mẫu':'Bắt đầu sổ mới',true);
 }
 
 function preserveRender() {
@@ -635,6 +765,9 @@ function handleAction(event) {
   const action=button.dataset.action,id=button.dataset.id;
   if(action==='backdrop'){if(event.target===button)closeModal();return;}
   const actions={
+    'enable-vault':enableVault,'backup-encrypted':downloadEncryptedBackup,'lock-vault':()=>location.reload(),
+    'cloud-connect':cloudConnect,'cloud-check':()=>cloud.check().then(()=>toast(cloud.status().remoteChanges?'Có thay đổi trên đám mây. Hãy xem và chọn bản cần giữ.':'Đám mây không có thay đổi mới.')),'cloud-pull':cloudPull,'cloud-push':cloudPush,'cloud-disconnect':cloudDisconnect,
+    'decrypt-import':()=>decryptPendingImport(),
     'toggle-theme':()=>{const result=setThemePreference(getResolvedTheme()==='dark'?'light':'dark');if(!result.persisted)toast('Đã đổi giao diện cho phiên này. Trình duyệt chưa cho lưu lựa chọn.',true);},
     'open-menu':()=>setMenu(true),'close-menu':()=>setMenu(false),
     'month-prev':()=>{if(ui.month>'1900-01'){ui.month=shiftMonth(ui.month,-1);ui.page=1;render();}},
@@ -646,7 +779,7 @@ function handleAction(event) {
     'add-wallet':()=>walletModal(),'edit-wallet':()=>walletModal(id),'delete-wallet':()=>removeRecord('accounts',id),
     'add-category':()=>categoryModal(),'edit-category':()=>categoryModal(id),'delete-category':()=>removeRecord('customCategories',id),
     'add-recurring':()=>recurringModal(),'edit-recurring':()=>recurringModal(id),'delete-recurring':()=>removeRecord('recurring',id),'post-recurring':()=>postRecurringModal(id),'skip-recurring':()=>skipRecurring(id),
-    'toggle-recurring':()=>{const next=clone(),rule=next.recurring.find(r=>r.id===id);if(!rule)return;rule.active=!rule.active;if(commit(next))toast(rule.active?'Đã tiếp tục theo dõi khoản định kỳ.':'Đã tạm dừng khoản định kỳ.');},
+    'toggle-recurring':async()=>{const next=clone(),rule=next.recurring.find(r=>r.id===id);if(!rule)return;rule.active=!rule.active;if(await commit(next))toast(rule.active?'Đã tiếp tục theo dõi khoản định kỳ.':'Đã tạm dừng khoản định kỳ.');},
     'wallet-transactions':()=>{resetFilters();ui.accountId=id;ui.allMonths=true;location.hash='transactions';},
     'page-prev':()=>{ui.page=Math.max(1,ui.page-1);render();},'page-next':()=>{ui.page++;render();},
     'reset-filters':()=>{resetFilters();render();},
@@ -717,7 +850,7 @@ document.addEventListener('change',event=>{
   else if(el.id==='field-accountId' && $('#transaction-form')?.elements.type.value==='transfer'){const form=$('#transaction-form');$('#transaction-routing').innerHTML=transactionRouting('transfer',Object.fromEntries(new FormData(form)));}
   else if(el.id==='import-file'){const file=el.files?.[0];el.value='';readImport(file);}
 });
-document.addEventListener('submit',event=>{
+document.addEventListener('submit',async event=>{
   const form=event.target;if(!['transaction-form','budget-form','goal-form','wallet-form','contribute-form','profile-form','category-form','recurring-form','recurring-post-form'].includes(form.id))return;
   event.preventDefault();form.querySelectorAll('[data-money-input]').forEach(validateMoneyInput);if(!form.reportValidity())return;
   const data=Object.fromEntries(new FormData(form)),id=form.dataset.id;let next=clone(),message='Đã lưu thay đổi.';
@@ -770,7 +903,7 @@ document.addEventListener('submit',event=>{
       goal.saved+=amount;message='Đã cập nhật số tiền tiết kiệm.';
     }
     validateState(next);
-    if(commit(next,{reason:message})) { if(form.id==='profile-form')profileDraft=null;else closeModal(true); if(form.id==='transaction-form'||form.id==='recurring-post-form'){ui.month=data.date.slice(0,7);ui.page=1;} if(form.id==='budget-form')ui.month=data.month;render();toast(message); }
+    if(await commit(next,{reason:message})) { if(form.id==='profile-form')profileDraft=null;else closeModal(true); if(form.id==='transaction-form'||form.id==='recurring-post-form'){ui.month=data.date.slice(0,7);ui.page=1;} if(form.id==='budget-form')ui.month=data.month;render();toast(message); }
   } catch(error) {const errorEl=$('#modal-error');if(errorEl){errorEl.textContent=error.message;errorEl.scrollIntoView({block:'nearest'});}else toast(error.message,true);}
 });
 document.addEventListener('keydown',event=>{
@@ -793,10 +926,10 @@ document.addEventListener('keydown',event=>{
   }
 });
 window.addEventListener('hashchange',()=>{ui.menu=false;ui.page=1;render();window.scrollTo({top:0,behavior:'instant'});});
-window.addEventListener('storage',event=>{
-  if(event.key!==KEY && event.key!==null)return;
+window.addEventListener('storage',async event=>{
+  if(event.key!==(vault.enabled?VAULT_KEY:KEY) && event.key!==null)return;
   if($('.modal')) {pendingStorageRefresh=true;toast('Sổ vừa thay đổi ở tab khác. App sẽ cập nhật khi đóng hộp thoại và kiểm tra xung đột trước khi lưu.',true);return;}
-  applyStorageRefresh(true);
+  try { await applyStorageRefresh(true); } catch(error) {storageIssue=error.message;render();toast(error.message,true);}
 });
 mobileNavigation.addEventListener('change',()=>{
   if(!mobileNavigation.matches)ui.menu=false;
@@ -805,9 +938,11 @@ mobileNavigation.addEventListener('change',()=>{
   if(!ui.menu)$('.mobile-overlay')?.remove();
   document.body.style.overflow=$('.modal')||(ui.menu&&mobileNavigation.matches)?'hidden':'';
 });
-window.addEventListener('beforeunload',event=>{if(!updateInProgress&&(formDirty||(profileDraft!==null&&profileDraft!==state.profile.name)||(backups.getStatus().mode==='file'&&backups.getStatus().pendingWrites))){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{if(!updateInProgress&&(savingLedger||formDirty||(profileDraft!==null&&profileDraft!==state.profile.name)||(backups.getStatus().mode==='file'&&backups.getStatus().pendingWrites))){event.preventDefault();event.returnValue='';}});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')backups.flush().catch(()=>{});});
 window.addEventListener('pagehide',()=>{backups.flush().catch(()=>{});});
+window.addEventListener('online',()=>{ if(cloud?.connection)void cloud.check(); });
+window.setInterval(()=>{ if(document.visibilityState==='visible'&&navigator.onLine&&cloud?.connection)void cloud.check(); },180000);
 window.addEventListener('money-management:themechange',()=>{
   const selector=$('#theme-preference');if(selector)selector.value=getThemePreference();
   const toggle=$('.theme-toggle');if(toggle){const label=getResolvedTheme()==='dark'?'Bật chế độ sáng':'Bật chế độ tối';toggle.setAttribute('aria-label',label);toggle.setAttribute('title',label);toggle.innerHTML=icon(getResolvedTheme()==='dark'?'sun':'moon');}
@@ -818,6 +953,7 @@ backups.init().then(async()=>{
   backupsReady=true;refreshBackupStatus();
   // Opening a blank or damaged primary must never overwrite the last good file.
   if(!primaryMissingAtBoot&&!storageIssue&&!backupNeedsRecovery)await backups.syncFile(state);
+  if(cloud?.connection && navigator.onLine!==false)void cloud.check();
 }).catch(()=>{
   backupsReady=true;backupNotice='Sổ có thể tiếp tục lưu trên trình duyệt. Chưa mở được sao lưu tự động; hãy tải một bản JSON trong Cài đặt.';refreshBackupStatus();
 });

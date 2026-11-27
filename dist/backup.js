@@ -210,6 +210,7 @@ export class BackupManager {
     this.storage = Object.hasOwn(options, 'storage') ? options.storage : safeGlobal('localStorage');
     this.picker = Object.hasOwn(options, 'picker') ? options.picker : globalThis.showSaveFilePicker?.bind(globalThis);
     this.download = options.download || defaultDownload;
+    this.encryptExternal = options.encryptExternal || null;
     this.getCurrentRaw = options.getCurrentRaw;
     this.getCurrentState = options.getCurrentState;
     this.locks = Object.hasOwn(options, 'locks') ? options.locks : nav?.locks;
@@ -494,7 +495,8 @@ export class BackupManager {
         let writable;
         try {
           writable = await connection.handle.createWritable();
-          await writable.write(JSON.stringify(JSON.parse(raw), null, 2));
+          const content = this.encryptExternal ? await this.encryptExternal(raw) : JSON.stringify(JSON.parse(raw), null, 2);
+          await writable.write(content);
           this._loadOptions();
           if (!this._isCurrent(raw) || generation !== this._generation || this._options.mode !== 'file') {
             await writable.abort?.();

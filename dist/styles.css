@@ -734,3 +734,18 @@ textarea.form-control { resize: vertical; min-height: 90px; }
   .balance-card .stat-label, .balance-card .stat-value, .balance-card .stat-footer { color: var(--ink); }
   .table-wrap { overflow: visible; }
 }
+
+/* Password unlock is shown before the financial application is initialized. */
+.vault-unlock { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: max(22px, env(safe-area-inset-top)) 18px max(22px, env(safe-area-inset-bottom)); background: var(--canvas, #f5f6f8); color: var(--ink, #16242a); }
+.vault-unlock-card { width: min(100%, 460px); background: var(--surface, #fff); border: 1px solid var(--border, #dce3e7); border-radius: 16px; padding: clamp(22px, 4vw, 38px); box-shadow: 0 12px 40px rgba(0, 0, 0, .07); display: grid; gap: 13px; }
+.vault-unlock-card img { border-radius: 14px; }
+.vault-unlock-card h1 { font-size: clamp(22px, 4vw, 30px); letter-spacing: -.035em; margin: 0; }
+.vault-unlock-card p { margin: 0; line-height: 1.6; }
+.vault-unlock-card label { font-weight: 650; font-size: 14px; }
+.vault-unlock-card input { width: 100%; min-height: 46px; border: 1px solid var(--border, #c7d1d8); border-radius: 9px; padding: 10px 13px; font-size: 16px; background: var(--surface, #fff); color: var(--ink, #16242a); }
+.vault-unlock-card .btn { min-height: 46px; justify-content: center; }
+#security-settings .form-control, #cloud-settings .form-control { width: 100%; min-height: 45px; }
+#cloud-settings code { white-space: normal; overflow-wrap: anywhere; font-size: .83em; }
+#cloud-settings .settings-actions { gap: 9px; }
+#security-settings p, #cloud-settings p { line-height: 1.6; }
+@media (max-width: 540px) { #security-settings .settings-actions .btn, #cloud-settings .settings-actions .btn { flex: 1 1 100%; justify-content: center; } .vault-unlock-card { padding: 22px; } }

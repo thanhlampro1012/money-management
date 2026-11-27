@@ -1,14 +1,14 @@
 /* Only the public application shell belongs in this cache. Financial data stays
  * in the storage/backup layers; other projects on the same origin are untouched.
  * Bump VERSION for every release that changes a precached file. */
-const VERSION = '1.3.0-final';
+const VERSION = '1.4.0-encrypted-cloud';
 const SCOPE = new URL(self.registration.scope);
 const CACHE_PREFIX = `money-management:${SCOPE.href}:`;
 const CACHE_NAME = `${CACHE_PREFIX}${VERSION}`;
 const APP_FILES = [
   'index.html', 'app.js', 'finance.js', 'storage.js', 'backup.js', 'input.js',
   'theme.js', 'export.js', 'export-template.js', 'styles.css', 'mobile.css',
-  'pwa.js', 'manifest.webmanifest', 'icon.svg', 'icons/apple-touch-icon.png',
+  'pwa.js', 'vault.js', 'cloud.js', 'manifest.webmanifest', 'icon.svg', 'icons/apple-touch-icon.png',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png',
 ];
 const APP_URLS = APP_FILES.map(file => new URL(file, SCOPE).href);
