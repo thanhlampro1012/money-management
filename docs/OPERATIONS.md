@@ -2,6 +2,8 @@
 
 Tài liệu này dành cho việc sử dụng sổ cá nhân trên một trình duyệt và cho người triển khai website tĩnh. Dữ liệu nằm trên thiết bị; việc website vẫn hoạt động không đồng nghĩa đã có bản sao sổ ở máy chủ.
 
+Website GitHub Pages: **https://thanhlampro1012.github.io/money-management/**. Nếu đã có sổ tại địa chỉ Sites cũ, thực hiện [chuyển sổ bằng JSON](#chuyển-sổ-từ-địa-chỉ-sites-cũ-sang-github-pages) trước khi bắt đầu ghi tiếp tại địa chỉ mới.
+
 ## 1. Thiết lập sổ ban đầu
 
 Một trình duyệt chưa có dữ liệu bắt đầu bằng sổ trống và ví **Tiền mặt** có số dư bằng 0. Nếu đã sử dụng phiên bản cũ tại cùng địa chỉ website, sổ hiện có được giữ lại và chuẩn hóa khi đọc. App không tự thay sổ cũ bằng dữ liệu mẫu.
@@ -124,6 +126,14 @@ Lưu trữ kiểm tra phiên dữ liệu trước khi ghi và kiểm tra lại s
 
 Phần website hoàn chỉnh nằm trong `dist/`. Phục vụ nguyên thư mục qua dịch vụ lưu trữ tĩnh có HTTPS; các module, CSS và icon phải nằm đúng vị trí tương đối. Không có dependency cần cài, bước build, cơ sở dữ liệu hoặc API secret của app. Máy chủ Node đi kèm chỉ phục vụ phát triển tại máy.
 
+### GitHub Pages
+
+Trong repository `thanhlampro1012/money-management`, chọn **Settings → Pages → Build and deployment → Source: GitHub Actions**. Repository và gói tài khoản phải đủ điều kiện dùng Pages; với GitHub Free, repository cần công khai. Xem [điều kiện GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-github-pages-site).
+
+Workflow `.github/workflows/pages.yml` chạy trên push vào `main` hoặc chạy thủ công bằng **Actions → Publish Money Management → Run workflow** với nhánh `main`. Workflow dùng Node.js 22 để chạy `npm run check` và `npm test`, sau đó tải nội dung `dist/` làm artifact Pages và triển khai với environment `github-pages`. Quyền workflow gồm `contents: read`, `pages: write` và `id-token: write`; không cần thêm API secret của ứng dụng. Xem [cấu hình workflow Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
+
+Theo dõi lần chạy đến khi bước **Publish website** thành công, rồi mở **https://thanhlampro1012.github.io/money-management/**. Kiểm tra trang, CSS, biểu tượng và thao tác chuyển mục. Các tài nguyên dùng đường dẫn tương đối và điều hướng dùng dấu `#`, phù hợp với đường dẫn dự án `/money-management/`.
+
 Trước khi phát hành:
 
 ```bash
@@ -141,15 +151,25 @@ Sau đó kiểm tra trên trình duyệt việc mở trang, thêm/sửa/xóa m�
 4. Triển khai đồng bộ các file trong `dist/`, rồi tải lại trang. Không xóa bộ nhớ để buộc cập nhật giao diện.
 5. Đối chiếu số dư, giao dịch và ngân sách; tải bản JSON mới sau khi xác nhận dữ liệu đúng.
 
-Schema sổ v1/v2 được đọc và chuẩn hóa thành v3 trong bộ nhớ, chưa ghi đè dữ liệu chỉ vì mở app. Lần lưu chủ động thành công tiếp theo ghi v3. Các bản ghi có sẵn được giữ nguyên; danh mục tự tạo và lịch định kỳ là các phần bổ sung. Tên sản phẩm đổi thành Money Management không làm đổi địa chỉ bản đang chạy hoặc khóa dữ liệu.
+Schema sổ v1/v2 được đọc và chuẩn hóa thành v3 trong bộ nhớ, chưa ghi đè dữ liệu chỉ vì mở app. Lần lưu chủ động thành công tiếp theo ghi v3. Các bản ghi có sẵn được giữ nguyên; danh mục tự tạo và lịch định kỳ là các phần bổ sung. Đổi tên hiển thị sản phẩm không làm đổi khóa dữ liệu, nhưng chuyển sang GitHub Pages làm đổi origin nên cần nhập lại bản sao JSON.
 
 Nếu chuyển tên miền, giao thức, cổng, trình duyệt hoặc thiết bị, hãy xuất từ nơi cũ và nhập ở nơi mới. Hai nơi giữ hai sổ độc lập sau khi chuyển; việc nhập một lần không bật đồng bộ. Không chạy mã phiên bản cũ để ghi vào sổ v3. Khi cần quay lại phiên bản cũ, dùng bản sao đã xuất trước nâng cấp và kiểm tra tính tương thích: v1 không hiểu chuyển ví, còn v1/v2 không hiểu danh mục tự tạo và lịch của v3.
+
+### Chuyển sổ từ địa chỉ Sites cũ sang GitHub Pages
+
+1. Mở [địa chỉ Sites cũ](https://vi-minh-lam-finance.workspace-qu-1719.chatgpt.site) bằng đúng trình duyệt và hồ sơ đang giữ sổ. Vào **Cài đặt & dữ liệu → Tải bản sao JSON**.
+2. Kiểm tra file `.json` có trong thư mục tải xuống. Giữ bản sao này ở nơi riêng tư; file chưa được mã hóa. Excel không thay thế được JSON để chuyển toàn bộ sổ.
+3. Mở [Money Management trên GitHub Pages](https://thanhlampro1012.github.io/money-management/). Sổ trống ở địa chỉ mới không có nghĩa sổ cũ đã mất: hai địa chỉ có bộ nhớ riêng. Nếu đã ghi dữ liệu ở địa chỉ mới, tải JSON của sổ đó trước khi nhập.
+4. Chọn **Cài đặt & dữ liệu → Nhập bản sao JSON**, chọn file từ bước 1, đọc thông tin rồi xác nhận thay thế sổ tại địa chỉ mới. App không gộp hai sổ.
+5. Đối chiếu số lượng giao dịch, số dư từng ví, ngân sách, mục tiêu và các lịch định kỳ. Tải một bản JSON mới từ GitHub Pages khi đã xác nhận đúng; giữ sổ cũ cho đến lúc đối chiếu xong.
+
+Sau khi chuyển, ghi tiếp tại địa chỉ GitHub Pages. Thay đổi tại một địa chỉ không tự xuất hiện ở địa chỉ còn lại. Lựa chọn Sáng/Tối/Theo hệ thống không nằm trong JSON, nên chọn lại nếu cần. Dữ liệu tài chính không được đưa vào repository trong quá trình triển khai.
 
 ## 7. Giao diện, quyền truy cập và giới hạn vận hành
 
 Trong **Cài đặt & dữ liệu → Giao diện**, chọn Sáng, Tối hoặc Theo hệ thống. Nút góc trên chuyển nhanh giữa sáng và tối. Lựa chọn được lưu riêng trên trình duyệt, không nằm trong JSON tài chính; khi chuyển thiết bị có thể cần chọn lại. Nếu bộ nhớ bị chặn, app vẫn áp dụng lựa chọn trong phiên hiện tại và báo rằng chưa lưu được.
 
-Bản triển khai Sites có thể dùng cổng đăng nhập ChatGPT để giới hạn người mở trang. Đây là kiểm soát truy cập trang, tách biệt với dữ liệu trong `localStorage`. App chưa mã hóa sổ hoặc file sao lưu và chưa tách dữ liệu theo tài khoản đăng nhập trong cùng hồ sơ trình duyệt. Người dùng chung hồ sơ đó có thể đọc sổ tại cùng origin.
+Bản GitHub Pages là website công khai, mở trực tiếp mà không cần đăng nhập ChatGPT. Công khai website chỉ phục vụ mã ứng dụng; dữ liệu tài chính vẫn nằm trong `localStorage` trên trình duyệt của người dùng. App chưa mã hóa sổ hoặc file sao lưu và chưa tách dữ liệu theo tài khoản đăng nhập trong cùng hồ sơ trình duyệt. Người dùng chung hồ sơ đó có thể đọc sổ tại cùng origin.
 
 Không đưa file tài chính, log chứa nội dung giao dịch, thông tin xác thực hoặc API secret vào repository. Repository chỉ cần mã nguồn, kiểm thử, tài liệu và cấu hình triển khai; dữ liệu dùng thật nằm trong trình duyệt và các file người dùng tự xuất.
 

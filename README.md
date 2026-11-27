@@ -2,13 +2,13 @@
 
 **Phiên bản 1.2.0** — ứng dụng ghi chép thu chi cá nhân bằng tiếng Việt, sử dụng Việt Nam đồng (VND). Ứng dụng chạy trong trình duyệt, không có dependency bên ngoài hoặc bước build.
 
-[Mở ứng dụng](https://vi-minh-lam-finance.workspace-qu-1719.chatgpt.site) · [Hướng dẫn vận hành](docs/OPERATIONS.md) · [Đối chiếu tính năng và ưu tiên](docs/COMPARISON.md)
+[Mở ứng dụng trên GitHub Pages](https://thanhlampro1012.github.io/money-management/) · [Hướng dẫn vận hành](docs/OPERATIONS.md) · [Đối chiếu tính năng và ưu tiên](docs/COMPARISON.md)
 
 ## Phạm vi sử dụng
 
 Money Management phục vụ **một người quản lý sổ trên một trình duyệt và một địa chỉ website**, với bản sao JSON được tải xuống định kỳ. Dữ liệu lưu trong `localStorage`; chưa có máy chủ dữ liệu, đồng bộ nhiều thiết bị, mã hóa sổ hoặc kết nối ngân hàng. Chức năng chuyển giữa ví chỉ ghi nhận việc chuyển tiền đã thực hiện, không gọi API chuyển tiền.
 
-Nếu bản triển khai yêu cầu đăng nhập ChatGPT để mở trang, đó là kiểm soát quyền truy cập website. Cơ chế này không mã hóa dữ liệu trong trình duyệt và không tạo một tài khoản dữ liệu đồng bộ cho sổ.
+Bản GitHub Pages mở trực tiếp trên trình duyệt, không yêu cầu đăng nhập ChatGPT. Website công khai cung cấp mã ứng dụng; sổ tài chính vẫn nằm trong trình duyệt của người dùng, không được tải lên GitHub hoặc đồng bộ giữa các thiết bị.
 
 ## Tính năng
 
@@ -107,6 +107,7 @@ Chế độ **Sáng/Tối/Theo hệ thống** lưu riêng với sổ, không n�
 | `tests/` | Kiểm thử logic và các thành phần của ứng dụng. |
 | `scripts/serve.mjs` | Máy chủ tĩnh dành cho phát triển. |
 | `.github/workflows/ci.yml` | Kiểm tra cú pháp và kiểm thử trên CI. |
+| `.github/workflows/pages.yml` | Kiểm tra mã và xuất bản `dist/` lên GitHub Pages từ nhánh `main`. |
 | `docs/OPERATIONS.md` | Thiết lập, sao lưu, xử lý sự cố và nâng cấp. |
 | `docs/COMPARISON.md` | Đối chiếu nguồn chính thức và lý do ưu tiên các tính năng. |
 
@@ -114,9 +115,9 @@ Chế độ **Sáng/Tối/Theo hệ thống** lưu riêng với sổ, không n�
 
 Phục vụ trực tiếp nội dung **`dist/`** bằng một dịch vụ lưu trữ tĩnh, giữ các file cùng cấu trúc đường dẫn tương đối. Không cần máy chủ ứng dụng, cơ sở dữ liệu hay API secret. Máy chủ trong `scripts/serve.mjs` dành cho phát triển; khi triển khai thực tế, dùng dịch vụ lưu trữ tĩnh có HTTPS.
 
-Workflow CI có sẵn chỉ kiểm tra mã; nó không tự cấu hình hay triển khai GitHub Pages. Để dùng Pages hoặc dịch vụ tương đương, cấu hình xuất bản `dist/` trên dịch vụ được chọn.
+Địa chỉ GitHub Pages của dự án là **https://thanhlampro1012.github.io/money-management/**. Trong repository, chọn **Settings → Pages → Build and deployment → Source: GitHub Actions**. Workflow **Publish Money Management** chạy khi có push vào `main` hoặc khi chọn **Run workflow** trên nhánh `main`; nó kiểm tra cú pháp, chạy bộ kiểm thử, rồi xuất bản nội dung `dist/`. Chỉ bước triển khai thành công mới cập nhật website. Workflow CI riêng tiếp tục kiểm tra push và pull request. Xem [hướng dẫn workflow GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
 
-Khi nâng cấp, giữ nguyên **origin** và khóa lưu sổ để trình duyệt tiếp tục tìm thấy dữ liệu. Tên hiển thị đã đổi thành Money Management nhưng địa chỉ bản đang chạy được giữ nguyên vì lý do này. Nếu phải đổi origin, xuất JSON ở địa chỉ cũ rồi nhập ở địa chỉ mới. Xem quy trình cụ thể trong [OPERATIONS.md](docs/OPERATIONS.md).
+Khi nâng cấp tại cùng địa chỉ, giữ nguyên **origin** và khóa lưu sổ để trình duyệt tiếp tục tìm thấy dữ liệu. **Chuyển từ địa chỉ Sites cũ sang GitHub Pages không tự chuyển sổ**: mở [bản cũ](https://vi-minh-lam-finance.workspace-qu-1719.chatgpt.site), vào **Cài đặt & dữ liệu → Tải bản sao JSON**, kiểm tra file đã tải xuống, rồi mở địa chỉ GitHub Pages và chọn **Nhập bản sao JSON**. Việc nhập thay thế sổ tại địa chỉ mới sau xác nhận. Đối chiếu số dư và số giao dịch trước khi ngừng dùng bản cũ; hai địa chỉ giữ hai sổ độc lập. Xem quy trình cụ thể trong [OPERATIONS.md](docs/OPERATIONS.md#chuyển-sổ-từ-địa-chỉ-sites-cũ-sang-github-pages).
 
 ## Phạm vi phát triển tiếp
 
