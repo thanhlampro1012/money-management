@@ -39,15 +39,15 @@ class Server{
       subscribe(who,fn){let watchers=backend.watchers.get(who);if(!watchers){watchers=new Set();backend.watchers.set(who,watchers);}watchers.add(fn);return()=>watchers.delete(fn)},
       signIn:async()=>({user:{uid,email:'money@example.com'}}),
       signUp:async()=>({user:{uid,email:'money@example.com'}}),
-      signOut:async()=>{},close:()=>{},
+      signOut:async()=>{},resetPassword:async email=>{backend.lastResetEmail=email;},close:()=>{},
     };
   }
 }
-function makeDevice(server,{uid='same-user',onlineState=true,initial=null}={}){
+function makeDevice(server,{uid='same-user',onlineState=true,initial=null,crypto=webcrypto}={}){
   const vault=new Vault(),storage=new MemStorage();storeFirebaseConfig(config,storage);
   let ledger=initial?clone(initial):createEmptyState('2026-11-27');
   let safe=true; let online=onlineState;
-  const sync=new FirebaseLedgerSync({vault,storage,crypto:webcrypto,readState:()=>clone(ledger),
+  const sync=new FirebaseLedgerSync({vault,storage,crypto,readState:()=>clone(ledger),
     applyRemote:async value=>{ledger=clone(value);return true},canApplyRemote:()=>safe,
     online:()=>online,makeTransport:async()=>server.transport(uid)});
   return {sync,vault,storage,getLedger:()=>clone(ledger),putLedger:value=>{ledger=clone(value)},
@@ -160,8 +160,105 @@ test('repository rules are owner-scoped and deny public access', async()=>{
 
 test('service worker caches new local Firebase modules but not remote SDK or private data',async()=>{
   const sw=await readFile(new URL('../dist/sw.js',import.meta.url),'utf8');
-  assert.match(sw,/1\.5\.0-firebase-sync/);
+  assert.match(sw,/1\.5\.1-stability/);
   assert.match(sw,/firebase-sync\.js/);
   assert.match(sw,/firebase-transport\.js/);
   assert.doesNotMatch(sw,/www\.gstatic\.com.*APP_FILES/);
+});
+
+
+test('a local edit during async remote decryption never gets overwritten automatically', async()=>{
+  const server = new Server();
+  let pause = false;
+  let signalStarted;
+  const started = new Promise(resolve => { signalStarted = resolve; });
+  let release;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const slowCrypto = {
+    getRandomValues: array => webcrypto.getRandomValues(array),
+    subtle: {
+      digest: (...args) => webcrypto.subtle.digest(...args),
+      importKey: (...args) => webcrypto.subtle.importKey(...args),
+      deriveBits: (...args) => webcrypto.subtle.deriveBits(...args),
+      encrypt: (...args) => webcrypto.subtle.encrypt(...args),
+      async decrypt(...args) {
+        if (pause) { pause = false; signalStarted(); await blocked; }
+        return webcrypto.subtle.decrypt(...args);
+      },
+    },
+  };
+  const a=makeDevice(server),b=makeDevice(server,{crypto:slowCrypto});
+  await a.sync.start();await a.sync.createCloud('a long independent password');
+  await b.sync.start();await b.sync.connectCloud('a long independent password');await b.sync.useRemote();
+  pause = true;
+  const aData=a.getLedger();aData.profile.name='Cập nhật cloud';a.putLedger(aData);
+  await a.sync.localChanged();
+  await started;
+  const bData=b.getLedger();bData.profile.name='Giao dịch lưu tại máy';b.putLedger(bData);
+  release();
+  await wait();
+  assert.equal(b.getLedger().profile.name,'Giao dịch lưu tại máy');
+  assert.equal(b.sync.status().conflict,true);
+  assert.equal(b.sync.status().incoming,true);
+});
+
+test('password reset uses Firebase Auth without revealing whether the account exists', async()=>{
+  const server=new Server(),a=makeDevice(server);
+  await a.sync.start();
+  await assert.rejects(a.sync.resetPassword('not-an-email'),/email hợp lệ/);
+  await a.sync.resetPassword('user@example.com');
+  assert.equal(server.lastResetEmail,'user@example.com');
+});
+
+test('sign-out invalidates in-flight remote decryption', async()=>{
+  const server=new Server(),a=makeDevice(server),b=makeDevice(server);
+  await a.sync.start(); await a.sync.createCloud('a long independent password');
+  await b.sync.start(); await b.sync.connectCloud('a long independent password'); await b.sync.useRemote();
+  // Receive for an old identity must not apply to a signed-out ledger.
+  const remote = await b.sync.transport.get('same-user');
+  const receiving = b.sync._receive({...remote,revision:remote.revision+1});
+  await b.sync.signOut();
+  await receiving;
+  assert.equal(b.sync.status().signedIn,false);
+  assert.equal(b.sync.status().linked,false);
+});
+
+test('app checks pending vault writes and PWA update, and cloud-key confirmation before overwriting',async()=>{
+  const app=await readFile(new URL('../dist/app.js',import.meta.url),'utf8');
+  assert.match(app,/await cloud\.flush\(\)/);
+  assert.match(app,/if \(savingLedger \|\| cloudBusy\) return false/);
+  assert.match(app,/firebase-cloud-confirm/);
+  assert.match(app,/firebase-reset-password/);
+});
+
+test('older remote decrypt completion cannot roll back a newer Firestore revision', async()=>{
+  const server = new Server();
+  let pauseNext = false, signalPause, release;
+  const paused = new Promise(resolve => { signalPause = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const slowCrypto = {
+    getRandomValues: array => webcrypto.getRandomValues(array),
+    subtle: {
+      digest: (...args) => webcrypto.subtle.digest(...args),
+      importKey: (...args) => webcrypto.subtle.importKey(...args),
+      deriveBits: (...args) => webcrypto.subtle.deriveBits(...args),
+      encrypt: (...args) => webcrypto.subtle.encrypt(...args),
+      async decrypt(...args) {
+        if (pauseNext) { pauseNext = false; signalPause(); await gate; }
+        return webcrypto.subtle.decrypt(...args);
+      },
+    },
+  };
+  const a=makeDevice(server),b=makeDevice(server,{crypto:slowCrypto});
+  await a.sync.start();await a.sync.createCloud('a long independent password');
+  await b.sync.start();await b.sync.connectCloud('a long independent password');await b.sync.useRemote();
+  pauseNext = true;
+  let ledger=a.getLedger();ledger.profile.name='Old remote';a.putLedger(ledger);
+  await a.sync.localChanged(); await paused;
+  ledger=a.getLedger();ledger.profile.name='Newest remote';a.putLedger(ledger);
+  await a.sync.localChanged();await wait();
+  assert.equal(b.getLedger().profile.name,'Newest remote');
+  release(); await wait();
+  assert.equal(b.getLedger().profile.name,'Newest remote');
+  assert.equal(b.sync.status().revision,3);
 });

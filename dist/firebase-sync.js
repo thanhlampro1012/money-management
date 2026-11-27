@@ -57,7 +57,7 @@ export class FirebaseLedgerSync {
     this.makeTransport = makeTransport; this.onChange = onChange; this.online = online;
     this.config = loadFirebaseConfig(storage);
     this.transport = null; this.user = null; this.meta = null; this.remote = null;
-    this.pendingRemote = null; this._started = false; this._generation = 0;
+    this.pendingRemote = null; this._started = false; this._generation = 0; this._incomingSeq = 0;
     this._queue = Promise.resolve(); this._busyPush = false; this._applying = false; this._pendingAfterPush = false;
     this.view = { status: this.config ? 'ready' : 'unconfigured', error: '', email: '', uid: '',
       remoteExists: false, linked: false, dirty: false, conflict: false, revision: 0,
@@ -99,8 +99,17 @@ export class FirebaseLedgerSync {
     if (user && user.uid !== this.user?.uid) await this._authChanged(user);
     return this.status();
   }
+  async resetPassword(email) {
+    if (!this.config) throw problem('CONFIG', 'Hãy nhập cấu hình Firebase trước.');
+    await this.start();
+    if (!this.transport?.resetPassword) throw problem('NETWORK', 'Chưa kết nối được dịch vụ đặt lại mật khẩu Firebase.');
+    const address = typeof email === 'string' ? email.trim() : '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) throw problem('LOGIN', 'Hãy nhập địa chỉ email hợp lệ để nhận liên kết đặt lại mật khẩu.');
+    await this.transport.resetPassword(address);
+    return this.status();
+  }
   async signOut() {
-    ++this._generation;
+    ++this._generation; ++this._incomingSeq;
     this._unsub?.(); this._unsub = null;
     await this.transport?.signOut?.();
     this.user = null; this.meta = null; this.remote = null; this.pendingRemote = null;
@@ -110,6 +119,7 @@ export class FirebaseLedgerSync {
   async _authChanged(user) {
     if (user && this.user?.uid === user.uid && this._unsub) return;
     const generation = ++this._generation;
+    ++this._incomingSeq;
     this._unsub?.(); this._unsub = null;
     this.user = user;
     this.remote = null; this.pendingRemote = null;
@@ -135,11 +145,21 @@ export class FirebaseLedgerSync {
   }
   async _receive(remote) {
     if (this._busyPush || this._applying) { this._pendingAfterPush = true; return this.status(); }
+    // The subscription and an explicit check may overlap. Only the newest
+    // receive is allowed to apply or replace a pending revision.
+    const sequence = ++this._incomingSeq;
+    const generation = this._generation;
+    const uid = this.user?.uid;
+    const current = () => sequence === this._incomingSeq && generation === this._generation && this.user?.uid === uid;
     this.remote = remote;
     if (!this.user) return this.status();
-    if (!remote) return this._notify({ status: this.meta ? 'missing-remote' : 'empty-remote', remoteExists: false, incoming: false, error: '' });
+    if (!remote) {
+      this.pendingRemote = null;
+      return this._notify({ status: this.meta ? 'missing-remote' : 'empty-remote', remoteExists: false, incoming: false, error: '' });
+    }
     if (!this.meta) return this._notify({ status: 'needs-key', remoteExists: true, revision: remote.revision, incoming: false, error: '' });
     const localHash = await fingerprint(this.readState(), this.crypto);
+    if (!current()) return this.status();
     const dirty = localHash !== this.meta.fingerprint;
     const changed = remote.revision !== this.meta.revision;
     if (remote.revision < this.meta.revision) return this._notify({ status: 'conflict', conflict: true,
@@ -150,15 +170,20 @@ export class FirebaseLedgerSync {
       return this._notify({ status: dirty ? 'pending' : 'synced', remoteExists: true,
         dirty, conflict: false, revision: remote.revision, incoming: false, error: '' });
     }
-    const key = this.meta.key;
-    const incoming = await decryptCloudState(remote.envelope, key, this.crypto);
+    const incoming = await decryptCloudState(remote.envelope, this.meta.key, this.crypto);
+    if (!current()) return this.status();
+    // A user may save another transaction while decrypting the remote snapshot.
+    // Recompute after the await: never classify that fresh edit as a clean book.
+    const latestHash = await fingerprint(this.readState(), this.crypto);
+    if (!current()) return this.status();
+    const latestDirty = latestHash !== this.meta.fingerprint;
     this.pendingRemote = { ...remote, state: incoming };
-    if (dirty) return this._notify({ status: 'conflict', remoteExists: true,
+    if (latestDirty) return this._notify({ status: 'conflict', remoteExists: true,
       dirty: true, conflict: true, revision: remote.revision, incoming: true,
       error: 'Hai thiết bị đã thay đổi cùng một sổ. Không có dữ liệu nào bị ghi đè; hãy chọn bản muốn giữ.' });
     if (!this.canApplyRemote()) return this._notify({ status: 'incoming', incoming: true, remoteExists: true,
       error: 'Có dữ liệu mới nhưng đang mở biểu mẫu. Hãy hoàn tất biểu mẫu rồi nhận cập nhật.' });
-    return this.useRemote();
+    return this.useRemote({ automatic: true, expectedRevision: remote.revision });
   }
   async _persistMeta(next) {
     await this.vault.setMetadata('firebase', next);
@@ -198,28 +223,49 @@ export class FirebaseLedgerSync {
     } catch (error) { this._fail(error); throw error; }
   }
   /** A conflict or new login is resolved only after the owner confirms it. */
-  async useRemote() {
+  async useRemote({ automatic = false, expectedRevision = null } = {}) {
     if (!this.pendingRemote) throw problem('NO_REMOTE', 'Không có bản mới để nhận.');
     const picked = this.pendingRemote;
+    const uid = this.user?.uid;
+    const generation = this._generation;
     if (this._applying) return this.status();
-    if (!this.canApplyRemote()) return this._notify({ status: 'incoming', incoming: true, error: 'Hãy đóng biểu mẫu và thử nhận cập nhật lại.' });
+    if (!this.canApplyRemote()) return this._notify({ status: 'incoming', incoming: true,
+      error: 'Hãy đóng biểu mẫu và thử nhận cập nhật lại.' });
     const before = await fingerprint(this.readState(), this.crypto);
     const target = await fingerprint(picked.state, this.crypto);
     if (!this.meta && !picked.key) throw problem('PASSWORD', 'Cần mật khẩu đám mây để liên kết thiết bị.');
-    // Apply first; if it fails the local checkpoint is unchanged so the user
-    // can retry without losing either ledger.
+    // Confirm no document, identity or local revision changed during awaits.
+    if (generation !== this._generation || uid !== this.user?.uid || this.pendingRemote !== picked
+      || (expectedRevision !== null && picked.revision !== expectedRevision)) return this.status();
+    if (automatic && before !== this.meta?.fingerprint) return this._notify({ status: 'conflict',
+      dirty: true, conflict: true, incoming: true,
+      error: 'Sổ trên máy vừa có thay đổi. Đã dừng nhận tự động để tránh ghi đè.' });
+    const latest = await fingerprint(this.readState(), this.crypto);
+    if (generation !== this._generation || uid !== this.user?.uid || this.pendingRemote !== picked) return this.status();
+    if (latest !== before || !this.canApplyRemote()) return this._notify({ status: 'incoming', incoming: true,
+      error: 'Sổ đã thay đổi hoặc còn biểu mẫu đang mở. Hãy xem lại dữ liệu trước khi xác nhận nhận bản đám mây.' });
     this._applying = true;
     try {
       if (before !== target && !(await this.applyRemote(picked.state))) throw problem('LOCAL_SAVE', 'Không ghi được sổ đám mây xuống thiết bị. Bản hiện tại chưa bị thay thế.');
-    } finally { this._applying = false; }
-    const next = { uid: this.user.uid, projectId: this.config.projectId, revision: picked.revision,
-      key: picked.key || this.meta.key, salt: picked.salt || this.meta.salt,
-      fingerprint: target, lastSyncedAt: new Date().toISOString() };
-    await this._persistMeta(next);
-    this.remote = { revision: picked.revision, envelope: picked.envelope };
-    this.pendingRemote = null;
-    return this._notify({ status: 'synced', linked: true, remoteExists: true, dirty: false,
-      conflict: false, incoming: false, revision: picked.revision, lastSyncedAt: next.lastSyncedAt, error: '' });
+      const next = { uid: this.user.uid, projectId: this.config.projectId, revision: picked.revision,
+        key: picked.key || this.meta.key, salt: picked.salt || this.meta.salt,
+        fingerprint: target, lastSyncedAt: new Date().toISOString() };
+      await this._persistMeta(next);
+      this.remote = { revision: picked.revision, envelope: picked.envelope };
+      this.pendingRemote = null;
+      const dirty = (await fingerprint(this.readState(), this.crypto)) !== next.fingerprint;
+      const state = this._notify({ status: dirty ? 'pending' : 'synced', linked: true, remoteExists: true,
+        dirty, conflict: false, incoming: false, revision: picked.revision,
+        lastSyncedAt: next.lastSyncedAt, error: '' });
+      if (dirty) void this.localChanged();
+      return state;
+    } finally {
+      this._applying = false;
+      if (this._pendingAfterPush && generation === this._generation) {
+        this._pendingAfterPush = false;
+        void this.check();
+      }
+    }
   }
   async localChanged() {
     if (!this.meta || !this.user || !this.vault.enabled) return false;
@@ -270,10 +316,14 @@ export class FirebaseLedgerSync {
     const next = { ...this.meta, revision: record.revision, fingerprint: fingerprintLocal, lastSyncedAt: new Date().toISOString() };
     await this._persistMeta(next);
     this.pendingRemote = null; this.remote = record;
-    return this._notify({ status: 'synced', linked: true, conflict: false, incoming: false,
-      dirty: false, revision: record.revision, lastSyncedAt: next.lastSyncedAt, error: '' });
+    const dirty = (await fingerprint(this.readState(), this.crypto)) !== next.fingerprint;
+    const status = this._notify({ status: dirty ? 'pending' : 'synced', linked: true, conflict: false, incoming: false,
+      dirty, revision: record.revision, lastSyncedAt: next.lastSyncedAt, error: '' });
+    if (dirty) void this.localChanged();
+    return status;
   }
   async disconnect() {
+    ++this._incomingSeq;
     this._unsub?.(); this._unsub = null;
     await this.vault.setMetadata('firebase', null);
     this.meta = null; this.pendingRemote = null; this.remote = null;

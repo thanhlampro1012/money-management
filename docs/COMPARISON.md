@@ -1,5 +1,8 @@
 # Đối chiếu tính năng và phạm vi bản 1.2
 
+> **Cập nhật 1.5.1:** Ứng dụng đã có mã nguồn đăng nhập/đồng bộ Firebase, mã hóa cục bộ, sao lưu JSON và khắc phục cạnh tranh giữa hai thiết bị. **Firebase chưa tự kích hoạt trên website công khai:** chủ dự án phải tạo hoặc kết nối dự án Firebase, bật Authentication + Firestore và công bố Security Rules. Xem [hướng dẫn Firebase](FIREBASE-SETUP.md), [ghi chú 1.5.1](RELEASE-1.5.1.md). Các kiểm thử tự động không thay thế việc thử bằng hai thiết bị thực tế.
+
+
 Đối chiếu ngày **27/11/2026** từ website và trung tâm trợ giúp chính thức của bốn ứng dụng. Mục tiêu là chọn các cải tiến hữu ích cho sổ cá nhân chạy tại trình duyệt; đây là đối chiếu tính năng được công bố, không phải kiểm thử trực tiếp tài khoản của các sản phẩm.
 
 ## Các khả năng có liên quan

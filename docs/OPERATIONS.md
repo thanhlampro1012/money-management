@@ -1,5 +1,8 @@
 # Vận hành Money Management 1.3.0
 
+> **Cập nhật 1.5.1:** Ứng dụng đã có mã nguồn đăng nhập/đồng bộ Firebase, mã hóa cục bộ, sao lưu JSON và khắc phục cạnh tranh giữa hai thiết bị. **Firebase chưa tự kích hoạt trên website công khai:** chủ dự án phải tạo hoặc kết nối dự án Firebase, bật Authentication + Firestore và công bố Security Rules. Xem [hướng dẫn Firebase](FIREBASE-SETUP.md), [ghi chú 1.5.1](RELEASE-1.5.1.md). Các kiểm thử tự động không thay thế việc thử bằng hai thiết bị thực tế.
+
+
 Tài liệu này dành cho việc sử dụng sổ cá nhân trên máy tính/điện thoại và cho người triển khai website tĩnh. Sổ và lịch sử nằm trên thiết bị; website công khai không nhận dữ liệu tài chính và chưa có tài khoản đăng nhập hay đồng bộ cloud. Chọn cách giữ thêm file JSON riêng để có thể phục hồi ngoài dữ liệu website.
 
 Website GitHub Pages: **https://thanhlampro1012.github.io/money-management/**. Nếu đã có sổ tại địa chỉ Sites cũ, thực hiện [chuyển sổ bằng JSON](#chuyển-sổ-từ-địa-chỉ-sites-cũ-sang-github-pages) trước khi bắt đầu ghi tiếp tại địa chỉ mới.

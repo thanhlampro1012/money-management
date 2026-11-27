@@ -42,6 +42,7 @@ export async function createFirebaseTransport(config, { onAuthChanged = () => {}
     signIn: (email, password) => authApi.signInWithEmailAndPassword(auth, email, password),
     signUp: (email, password) => authApi.createUserWithEmailAndPassword(auth, email, password),
     signOut: () => authApi.signOut(auth),
+    resetPassword: email => authApi.sendPasswordResetEmail(auth, email),
     get: async uid => normalize(await dbApi.getDocFromServer(docFor(uid))),
     subscribe(uid, next, fail = onError) {
       return dbApi.onSnapshot(docFor(uid), { includeMetadataChanges: true }, snapshot => {

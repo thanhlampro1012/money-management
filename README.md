@@ -1,10 +1,12 @@
 # Money Management
 
-**Phiên bản 1.5.0** — sổ thu chi cá nhân bằng tiếng Việt (VND), hỗ trợ giao diện di động/PWA, Excel, sao lưu, khóa sổ AES-256-GCM và tùy chọn đăng nhập + đồng bộ mã hóa giữa các thiết bị bằng Firebase Authentication và Cloud Firestore. Bản website tĩnh vẫn dùng miễn phí trên GitHub Pages; chức năng Firebase chỉ chạy sau khi chủ dự án cấu hình dịch vụ.
+**Phiên bản 1.5.1** — sổ thu chi cá nhân bằng tiếng Việt (VND), hỗ trợ giao diện di động/PWA, Excel, sao lưu, khóa sổ AES-256-GCM và tùy chọn đăng nhập + đồng bộ mã hóa giữa các thiết bị bằng Firebase Authentication và Cloud Firestore. Bản website tĩnh vẫn dùng miễn phí trên GitHub Pages; chức năng Firebase chỉ chạy sau khi chủ dự án cấu hình dịch vụ.
 
 [Mở ứng dụng trên GitHub Pages](https://thanhlampro1012.github.io/money-management/) · [Hướng dẫn vận hành](docs/OPERATIONS.md) · [Đối chiếu tính năng và ưu tiên](docs/COMPARISON.md)
 
-**Firebase (mới trong 1.5):** [Thiết lập Firebase project, Authentication và Firestore Rules](docs/FIREBASE-SETUP.md) · [Mã Firestore Rules](firestore.rules) · [Ghi chú phát hành 1.5.0](docs/RELEASE-1.5.0.md). Đăng nhập/đồng bộ chưa hoạt động cho đến khi bạn cung cấp cấu hình Web App và xuất bản quy tắc trên dự án Firebase của mình.
+**Firebase và an toàn dữ liệu (1.5.1):** [Thiết lập Firebase project, Authentication và Firestore Rules](docs/FIREBASE-SETUP.md) · [Mã Firestore Rules](firestore.rules) · [Ghi chú phát hành 1.5.1](docs/RELEASE-1.5.1.md). Đăng nhập/đồng bộ chưa hoạt động cho đến khi bạn cung cấp cấu hình Web App và xuất bản quy tắc trên dự án Firebase của mình.
+
+> **Lưu ý:** 1.5.1 bổ sung email đặt lại mật khẩu tài khoản Firebase, xác nhận mật khẩu cloud hai lần và ngăn bản cloud đến muộn ghi đè giao dịch vừa lưu. **Mật khẩu mã hóa riêng không thể đặt lại qua email.** Chưa thể xác minh đồng bộ thực tế khi chưa có Firebase project của chủ sở hữu.
 
 ## Phạm vi sử dụng
 
@@ -152,4 +154,4 @@ Khi nâng cấp tại cùng địa chỉ, giữ nguyên **origin** và khóa lư
 
 Phiên bản này ưu tiên ghi sổ cá nhân, lịch định kỳ, báo cáo Excel, offline, backup, khóa sổ và đồng bộ Firebase **tùy chọn**. Theo dõi vay/nợ chuyên biệt, chia sẻ sổ cho nhiều tài khoản cùng chỉnh sửa và kết nối ngân hàng chưa hỗ trợ. Xem [đối chiếu](docs/COMPARISON.md) và [hướng dẫn Firebase](docs/FIREBASE-SETUP.md).
 
-Đồng bộ Firebase trong 1.5.0 phục vụ **một chủ tài khoản trên nhiều thiết bị**, không phải nhiều tài khoản cùng quản lý một sổ. Nếu hai thiết bị sửa offline, app yêu cầu người dùng chọn bản giữ lại thay vì tự gộp. Việc dùng Firebase thật còn phụ thuộc dự án của chủ sở hữu, Security Rules đã Publish và thử nghiệm thực tế hai thiết bị.
+Đồng bộ Firebase từ 1.5 phục vụ **một chủ tài khoản trên nhiều thiết bị**, không phải nhiều tài khoản cùng quản lý một sổ. Nếu hai thiết bị sửa offline, app yêu cầu người dùng chọn bản giữ lại thay vì tự gộp. Việc dùng Firebase thật còn phụ thuộc dự án của chủ sở hữu, Security Rules đã Publish và thử nghiệm thực tế hai thiết bị.
