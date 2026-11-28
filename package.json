@@ -1,6 +1,6 @@
 {
   "name": "money-management",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "private": true,
   "type": "module",
   "description": "Quản lý thu chi VND, mã hóa sổ và đồng bộ an toàn giữa thiết bị qua Firebase Auth + Firestore.",

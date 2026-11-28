@@ -1,16 +1,16 @@
 # Money Management
 
-**Phiên bản 1.5.1** — sổ thu chi cá nhân bằng tiếng Việt (VND), hỗ trợ giao diện di động/PWA, Excel, sao lưu, khóa sổ AES-256-GCM và tùy chọn đăng nhập + đồng bộ mã hóa giữa các thiết bị bằng Firebase Authentication và Cloud Firestore. Bản website tĩnh vẫn dùng miễn phí trên GitHub Pages; chức năng Firebase chỉ chạy sau khi chủ dự án cấu hình dịch vụ.
+**Phiên bản 1.6.0** — sổ thu chi cá nhân bằng tiếng Việt (VND), hỗ trợ giao diện di động/PWA, Excel, sao lưu, khóa sổ AES-256-GCM và tùy chọn đăng nhập + đồng bộ mã hóa giữa các thiết bị bằng Firebase Authentication và Cloud Firestore. Bản GitHub Pages dùng Google Sign-In và Cloud Firestore tại Singapore.
 
 [Mở ứng dụng trên GitHub Pages](https://thanhlampro1012.github.io/money-management/) · [Hướng dẫn vận hành](docs/OPERATIONS.md) · [Đối chiếu tính năng và ưu tiên](docs/COMPARISON.md)
 
-**Firebase và an toàn dữ liệu (1.5.1):** [Thiết lập Firebase project, Authentication và Firestore Rules](docs/FIREBASE-SETUP.md) · [Mã Firestore Rules](firestore.rules) · [Ghi chú phát hành 1.5.1](docs/RELEASE-1.5.1.md). Đăng nhập/đồng bộ chưa hoạt động cho đến khi bạn cung cấp cấu hình Web App và xuất bản quy tắc trên dự án Firebase của mình.
+Trong **Cài đặt & dữ liệu → Tài khoản và đồng bộ**, chọn **Đăng nhập bằng Google**. Trên máy giữ sổ gốc, bật mã hóa và tạo bản đồng bộ đầu tiên. Trên máy thứ hai, dùng cùng tài khoản Google và mật khẩu mã hóa để mở sổ. Quyền Owner của dự án được quản lý trong Firebase Console.
 
-> **Lưu ý:** 1.5.1 bổ sung email đặt lại mật khẩu tài khoản Firebase, xác nhận mật khẩu cloud hai lần và ngăn bản cloud đến muộn ghi đè giao dịch vừa lưu. **Mật khẩu mã hóa riêng không thể đặt lại qua email.** Chưa thể xác minh đồng bộ thực tế khi chưa có Firebase project của chủ sở hữu.
+[Thiết lập Firebase và Firestore](docs/FIREBASE-SETUP.md) · [Quy tắc truy cập sổ](firestore.rules)
 
 ## Phạm vi sử dụng
 
-Mặc định, Money Management là **sổ cá nhân lưu tại trình duyệt**, dùng `localStorage` và IndexedDB; dữ liệu không tự chuyển sang một thiết bị khác. Sau khi chủ dự án thiết lập Firebase, người dùng có thể bật khóa sổ, đăng nhập Firebase Authentication, rồi xác nhận đưa bản sổ **đã mã hóa** lên Cloud Firestore để đồng bộ với thiết bị khác. Không dùng GitHub repo làm kho dữ liệu và không kết nối ngân hàng. Firebase cần cấu hình, Security Rules và kết nối mạng; ngoại tuyến vẫn ghi vào máy. Chức năng chuyển giữa ví chỉ ghi nhận việc chuyển tiền đã thực hiện, không gọi API chuyển tiền.
+Mặc định, Money Management là **sổ cá nhân lưu tại trình duyệt**, dùng `localStorage` và IndexedDB; dữ liệu không tự chuyển sang một thiết bị khác. Người dùng có thể bật khóa sổ, đăng nhập bằng Google, rồi xác nhận đưa bản sổ **đã mã hóa** lên Cloud Firestore để đồng bộ với thiết bị khác. Không dùng GitHub repo làm kho dữ liệu và không kết nối ngân hàng. Firebase cần cấu hình, Security Rules và kết nối mạng; ngoại tuyến vẫn ghi vào máy. Chức năng chuyển giữa ví chỉ ghi nhận việc chuyển tiền đã thực hiện, không gọi API chuyển tiền.
 
 
 ## Tính năng

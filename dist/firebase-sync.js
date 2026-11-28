@@ -1,5 +1,5 @@
 /** Optional encrypted, account-scoped Firebase Authentication + Firestore sync.
- * No Firebase is contacted until an owner supplies a web config and signs in.
+ * A device can keep its existing Firebase project or use the site default.
  * Server-side CAS, onSnapshot and an encrypted local checkpoint prevent silent
  * cross-device overwrites. Independent offline changes require explicit review.
  */
@@ -25,8 +25,15 @@ const sanitize = input => {
   return safe;
 };
 export const parseFirebaseConfig = sanitize;
-export function loadFirebaseConfig(storage = globalThis.localStorage) {
-  try { const raw = storage?.getItem(FIREBASE_CONFIG_KEY); return raw ? sanitize(raw) : null; }
+// The public Web App configuration of the GitHub Pages deployment.
+const siteFirebaseConfig = {
+  apiKey: 'AIzaSyD1sVTEOAeZTGdrGck6o8D7k5CD9mRBwdk',
+  authDomain: 'money-management-9dd1f.firebaseapp.com',
+  projectId: 'money-management-9dd1f',
+  appId: '1:271571072997:web:63b1c6d6580caf45a0210c',
+};
+export function loadFirebaseConfig(storage = globalThis.localStorage, siteConfig = siteFirebaseConfig) {
+  try { const raw = storage?.getItem(FIREBASE_CONFIG_KEY); return raw ? sanitize(raw) : siteConfig && sanitize(siteConfig); }
   catch { return null; }
 }
 export function storeFirebaseConfig(config, storage = globalThis.localStorage) {
@@ -63,7 +70,7 @@ export class FirebaseLedgerSync {
       remoteExists: false, linked: false, dirty: false, conflict: false, revision: 0,
       lastSyncedAt: null, syncing: false, incoming: false };
   }
-  status() { return { ...this.view, configured: Boolean(this.config), projectId: this.config?.projectId || '', signedIn: Boolean(this.user), remoteSummary: this.pendingRemote?.state ? {
+  status() { return { ...this.view, configured: Boolean(this.config), siteProject: this.config?.projectId === siteFirebaseConfig.projectId, projectId: this.config?.projectId || '', signedIn: Boolean(this.user), remoteSummary: this.pendingRemote?.state ? {
     transactions: this.pendingRemote.state.transactions.length, accounts: this.pendingRemote.state.accounts.length,
   } : null }; }
   _notify(patch = {}) { Object.assign(this.view, patch); try { this.onChange(this.status()); } catch { /* presentation only */ } return this.status(); }
@@ -95,6 +102,15 @@ export class FirebaseLedgerSync {
     if (!this.transport) throw problem('NETWORK', 'Chưa kết nối được SDK Firebase. Hãy kiểm tra mạng.');
     if (typeof email !== 'string' || !email.includes('@') || !password) throw problem('LOGIN', 'Hãy nhập email và mật khẩu tài khoản Firebase.');
     const result = await (signUp ? this.transport.signUp(email.trim(), password) : this.transport.signIn(email.trim(), password));
+    return this._finishSignIn(result);
+  }
+  async signInGoogle() {
+    // Open the provider window directly from the user's click.
+    if (!this.transport) throw problem('NETWORK', 'Chưa kết nối được Google. Hãy kiểm tra mạng rồi kết nối lại.');
+    const result = await this.transport.signInGoogle();
+    return this._finishSignIn(result);
+  }
+  async _finishSignIn(result) {
     const user = result?.user ? { uid: result.user.uid, email: result.user.email || '' } : this.transport.currentUser?.();
     if (user && user.uid !== this.user?.uid) await this._authChanged(user);
     return this.status();

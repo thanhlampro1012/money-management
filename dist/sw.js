@@ -1,7 +1,7 @@
 /* Only the public application shell belongs in this cache. Financial data stays
  * in the storage/backup layers; other projects on the same origin are untouched.
  * Bump VERSION for every release that changes a precached file. */
-const VERSION = '1.5.1-stability';
+const VERSION = '1.6.0-google-pages';
 const SCOPE = new URL(self.registration.scope);
 const CACHE_PREFIX = `money-management:${SCOPE.href}:`;
 const CACHE_NAME = `${CACHE_PREFIX}${VERSION}`;

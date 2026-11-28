@@ -160,7 +160,7 @@ test('repository rules are owner-scoped and deny public access', async()=>{
 
 test('service worker caches new local Firebase modules but not remote SDK or private data',async()=>{
   const sw=await readFile(new URL('../dist/sw.js',import.meta.url),'utf8');
-  assert.match(sw,/1\.5\.1-stability/);
+  assert.ok(sw.includes(JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8')).version));
   assert.match(sw,/firebase-sync\.js/);
   assert.match(sw,/firebase-transport\.js/);
   assert.doesNotMatch(sw,/www\.gstatic\.com.*APP_FILES/);
@@ -261,4 +261,54 @@ test('older remote decrypt completion cannot roll back a newer Firestore revisio
   release(); await wait();
   assert.equal(b.getLedger().profile.name,'Newest remote');
   assert.equal(b.sync.status().revision,3);
+});
+
+test('fresh devices use the site config and existing devices keep their project', () => {
+  const storage = new MemStorage();
+  assert.equal(loadFirebaseConfig(storage).projectId, 'money-management-9dd1f');
+  assert.equal(loadFirebaseConfig(storage, null), null);
+  assert.deepEqual(loadFirebaseConfig(storage, config), config);
+  const previous = { ...config, projectId: 'previous-project' };
+  storeFirebaseConfig(previous, storage);
+  assert.deepEqual(loadFirebaseConfig(storage, config), previous);
+});
+
+test('Google opens from the click and signing in never publishes the local book', async () => {
+  const server = new Server(), device = makeDevice(server);
+  device.vault.enabled = false;
+  const ledger = device.getLedger();
+  let opened = 0;
+  device.sync.makeTransport = async () => ({
+    ...server.transport('google-uid'),
+    currentUser: () => null,
+    signInGoogle: () => {
+      opened++;
+      return Promise.resolve({ user: { uid: 'google-uid', email: 'sample@example.com' } });
+    },
+  });
+  await device.sync.start();
+  const signingIn = device.sync.signInGoogle();
+  assert.equal(opened, 1);
+  await signingIn;
+  assert.equal(device.sync.status().email, 'sample@example.com');
+  assert.equal(device.sync.status().linked, false);
+  assert.equal(server.docs.size, 0);
+  assert.deepEqual(device.getLedger(), ledger);
+  await device.sync.signOut();
+  assert.equal(device.sync.status().signedIn, false);
+});
+
+test('cancelled Google sign-in leaves the device ledger and connection untouched', async () => {
+  const server = new Server(), device = makeDevice(server);
+  const ledger = device.getLedger();
+  device.sync.makeTransport = async () => ({
+    ...server.transport('sample'),
+    currentUser: () => null,
+    signInGoogle: async () => { throw Object.assign(new Error('Closed'), { code: 'auth/popup-closed-by-user' }); },
+  });
+  await device.sync.start();
+  await assert.rejects(device.sync.signInGoogle(), { code: 'auth/popup-closed-by-user' });
+  assert.equal(device.sync.status().signedIn, false);
+  assert.equal(server.docs.size, 0);
+  assert.deepEqual(device.getLedger(), ledger);
 });

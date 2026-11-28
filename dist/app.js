@@ -523,53 +523,59 @@ function refreshCloudStatus() {
 }
 
 /** Firebase Authentication + Firestore: optional, private to the signed-in UID. */
-function firebaseMarkup() {
-  const f = firebaseSync.status();
-  const label = ({unconfigured:'Chưa thiết lập',ready:'Sẵn sàng cấu hình',connecting:'Đang kết nối',
+function firebaseStatusLabel(status) {
+  return ({unconfigured:'Chưa thiết lập',ready:'Chưa kết nối',connecting:'Đang kết nối',
     'signed-out':'Chưa đăng nhập',checking:'Đang kiểm tra bản đám mây',
     'empty-remote':'Chưa có sổ trên Firebase','missing-remote':'Thiếu bản đám mây',
     'needs-key':'Cần mật khẩu mã hóa đám mây',incoming:'Cần xác nhận bản đám mây',
     conflict:'Xung đột hai thiết bị',pending:'Chưa đẩy xong thay đổi',
-    syncing:'Đang đồng bộ',synced:'Đã đồng bộ',offline:'Ngoại tuyến',error:'Có lỗi'})[f.status] || f.status;
+    syncing:'Đang đồng bộ',synced:'Đã đồng bộ',offline:'Ngoại tuyến',error:'Có lỗi'})[status] || status;
+}
+function firebaseMarkup() {
+  const f = firebaseSync.status();
+  const label = firebaseStatusLabel(f.status);
   return `<section class="card settings-section" id="firebase-settings">
-    <div class="card-header"><h2 class="card-title">Đồng bộ điện thoại và máy tính · Firebase</h2></div>
+    <div class="card-header"><h2 class="card-title">Tài khoản và đồng bộ</h2></div>
     <div class="card-body">
-      <p>Đăng nhập cùng tài khoản trên các thiết bị để nhận cập nhật qua <strong>Firebase Authentication + Firestore</strong>. Dữ liệu được <strong>mã hóa trước khi gửi</strong>; repo GitHub không lưu sổ chi tiêu hay mật khẩu.</p>
+      <p>Dùng cùng tài khoản Google để mở sổ thu chi trên điện thoại và máy tính.</p>
       <div class="backup-status"><span>Trạng thái</span><strong id="firebase-live" role="status">${esc(label)}</strong></div>
       ${f.error ? `<p class="field-error" role="alert">${esc(f.error)}</p>` : ''}
-      <p class="helper-text">${f.configured ? `Dự án Firebase: <code>${esc(f.projectId)}</code> · ` : ''}${f.email ? `Tài khoản: <strong>${esc(f.email)}</strong> · ` : ''}Phiên bản cloud: ${f.revision || 'chưa có'}. ${f.lastSyncedAt ? `Lần đồng bộ: ${backupTime(f.lastSyncedAt)}.` : ''}</p>
-      ${!vault.enabled ? '<p class="helper-text"><strong>Bước 1:</strong> Hãy bật mã hóa dữ liệu trên thiết bị ở phần trên trước khi đồng bộ. Đây là yêu cầu để dữ liệu Firestore luôn được mã hóa.</p>' : ''}
-      <details class="firebase-config" ${!f.configured?'open':''}><summary>${f.configured ? 'Xem / đổi cấu hình dự án Firebase' : 'Bước 1 · Nhập cấu hình Firebase Web App'}</summary>
-        <p class="helper-text">Tạo dự án ở <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer">Firebase Console</a>, bật <strong>Authentication → Email/Password</strong> và <strong>Cloud Firestore</strong>. Dán đối tượng <code>firebaseConfig</code> của ứng dụng Web tại đây; đừng dán mật khẩu, service-account JSON hay private key. Firestore Security Rules phải giới hạn dữ liệu theo UID.</p>
-        <label for="firebase-web-config">Cấu hình Firebase Web App (JSON)</label>
-        <textarea id="firebase-web-config" class="form-control" rows="5" autocomplete="off" spellcheck="false" placeholder='{"apiKey":"...","authDomain":"...firebaseapp.com","projectId":"...","appId":"..."}'></textarea>
-        <div class="settings-actions"><button class="btn secondary" data-action="firebase-configure" ${f.signedIn?'disabled':''}>Lưu cấu hình</button></div>
-        <p class="helper-text">Cấu hình web là thông tin công khai, không phải mật khẩu. Cần cấu hình cùng một Firebase project trên từng thiết bị, trừ khi được tích hợp sẵn vào website. <a href="https://github.com/thanhlampro1012/money-management/blob/main/docs/FIREBASE-SETUP.md" target="_blank" rel="noopener noreferrer">Hướng dẫn thiết lập chi tiết</a>.</p>
-      </details>
-      ${f.configured && vault.enabled && !f.signedIn ? `<div class="firebase-auth-fields">
-        <h3>Đăng nhập tài khoản</h3>
+      ${f.email ? `<p>Đã đăng nhập bằng <strong>${esc(f.email)}</strong></p>` : ''}
+      ${f.lastSyncedAt ? `<p class="helper-text">Đồng bộ gần nhất lúc ${backupTime(f.lastSyncedAt)} · Bản ${f.revision}</p>` : ''}
+      ${!f.configured ? '<p class="helper-text">Trang này chưa kết nối Firebase. Sổ hiện được lưu trên thiết bị.</p>' : ''}
+      ${f.configured && !f.signedIn ? `<div class="firebase-auth-fields">
+        ${firebaseSync.transport ? '<button class="btn primary" data-action="firebase-google">Đăng nhập bằng Google</button>' : `<button class="btn secondary" data-action="firebase-retry" ${f.status==='connecting'?'disabled':''}>${f.status==='connecting'?'Đang kết nối…':'Kết nối lại Firebase'}</button>`}
+        ${!f.siteProject ? `<details><summary>Dùng email và mật khẩu</summary>
         <div class="form-group"><label for="firebase-email">Email đăng nhập</label><input id="firebase-email" class="form-control" type="email" autocomplete="username" inputmode="email" placeholder="email@example.com"></div>
         <div class="form-group"><label for="firebase-password">Mật khẩu tài khoản</label><input id="firebase-password" class="form-control" type="password" autocomplete="current-password" minlength="6"></div>
         <div class="settings-actions"><button class="btn primary" data-action="firebase-login">Đăng nhập</button><button class="btn secondary" data-action="firebase-register">Tạo tài khoản</button><button class="btn ghost" data-action="firebase-reset-password">Quên mật khẩu?</button></div>
-      </div>` : ''}
+      </details>` : ''}</div>` : ''}
+      ${f.signedIn && !vault.enabled ? '<p>Bật “Mã hóa dữ liệu trên thiết bị” để bắt đầu đồng bộ sổ.</p><button class="btn ghost" data-action="firebase-logout">Đăng xuất</button>' : ''}
       ${f.signedIn && vault.enabled ? `<div class="settings-actions"><button class="btn secondary" data-action="firebase-check">Kiểm tra cập nhật</button>${f.linked ? '<button class="btn secondary" data-action="firebase-push">Đồng bộ ngay</button><button class="btn ghost" data-action="firebase-disconnect">Ngắt sổ trên thiết bị</button>' : ''}<button class="btn ghost" data-action="firebase-logout">Đăng xuất</button></div>
-      ${!f.linked ? `<div class="firebase-key-fields"><h3>${f.remoteExists?'Mở sổ đã có trên Firebase':'Tạo bản sổ Firebase đầu tiên'}</h3>
+      ${!f.linked && ['empty-remote','needs-key'].includes(f.status) ? `<div class="firebase-key-fields"><h3>${f.remoteExists?'Mở sổ đã có trên Firebase':'Tạo bản sổ Firebase đầu tiên'}</h3>
         <p>Nhập mật khẩu <strong>mã hóa đám mây riêng (ít nhất 12 ký tự)</strong>. Mật khẩu này phải giống nhau khi mở sổ trên thiết bị thứ hai và không thể lấy lại từ Firebase.</p>
         <div class="form-group"><label for="firebase-cloud-password">Mật khẩu giải mã sổ đám mây</label><input type="password" id="firebase-cloud-password" class="form-control" autocomplete="off" minlength="12" placeholder="Không dùng mật khẩu đăng nhập Firebase"></div>
         ${!f.remoteExists ? '<div class="form-group"><label for="firebase-cloud-confirm">Nhập lại mật khẩu mã hóa đám mây</label><input type="password" id="firebase-cloud-confirm" class="form-control" autocomplete="new-password" minlength="12"></div>' : ''}
         <div class="settings-actions"><button class="btn primary" data-action="${f.remoteExists?'firebase-connect-cloud':'firebase-create-cloud'}">${f.remoteExists?'Giải mã và xem bản cloud':'Tạo bản cloud từ sổ này'}</button></div></div>` : ''}
       ${f.incoming ? `<div class="firebase-conflict" role="status"><strong>${f.conflict?'Hai thiết bị cùng sửa sổ':'Bản đám mây có cập nhật cần nhận'}</strong><p>${f.remoteSummary ? `${f.remoteSummary.transactions} giao dịch · ${f.remoteSummary.accounts} ví trên đám mây.` : ''} Nhận bản đám mây sẽ thay sổ hiện tại, không tự gộp giao dịch. Hãy tải JSON trước.</p><div class="settings-actions"><button class="btn primary" data-action="firebase-use-cloud">Nhận bản Firebase</button>${f.conflict&&f.linked?'<button class="btn danger" data-action="firebase-keep-local">Ghi đè cloud bằng sổ máy này</button>':''}</div></div>` : ''}
       ${f.linked ? '<p class="helper-text">Khi có mạng, lưu thu chi sẽ tự gửi bản mã hóa lên Firestore. Thiết bị còn lại nhận cập nhật lúc app mở. Nếu cả hai sửa lúc mất mạng, app giữ hai bản và yêu cầu bạn chọn; không âm thầm gộp/ghi đè. Sổ vẫn lưu được khi offline.</p>' : ''}` : ''}
-      <p class="helper-text">Đây là tính năng tùy chọn. Nếu chưa có Firebase project hoặc chưa đăng nhập, app vẫn ghi chép và sao lưu JSON như cũ. Không đặt thông tin tài khoản Firebase vào GitHub repo.</p>
+      <details class="firebase-config"><summary>Cấu hình dự án Firebase</summary>
+        ${f.configured ? `<p>Dự án đang dùng <code>${esc(f.projectId)}</code></p>` : ''}
+        <label for="firebase-web-config">Cấu hình Web App (JSON)</label>
+        <textarea id="firebase-web-config" class="form-control" rows="4" autocomplete="off" spellcheck="false"></textarea>
+        <div class="settings-actions"><button class="btn secondary" data-action="firebase-configure" ${f.signedIn || f.status==='connecting'?'disabled':''}>Lưu cấu hình</button></div>
+        <a href="https://github.com/thanhlampro1012/money-management/blob/main/docs/FIREBASE-SETUP.md" target="_blank" rel="noopener noreferrer">Hướng dẫn cấu hình Firebase</a>
+      </details>
     </div></section>`;
 }
 function refreshFirebaseStatus() {
   const panel = $('#firebase-settings');
   const f = firebaseSync.status();
-  if (panel && !panel.contains(document.activeElement)) panel.outerHTML = firebaseMarkup();
+  const editing = panel?.contains(document.activeElement) && document.activeElement.matches('input, textarea');
+  if (panel && !editing) panel.outerHTML = firebaseMarkup();
   else {
     const live = $('#firebase-live');
-    if (live) live.textContent = f.error || ({synced:'Đã đồng bộ',syncing:'Đang đồng bộ',conflict:'Xung đột dữ liệu',pending:'Chưa đồng bộ xong',offline:'Ngoại tuyến',incoming:'Đang chờ nhận dữ liệu'})[f.status] || f.status;
+    if (live) live.textContent = f.error || firebaseStatusLabel(f.status);
   }
   const attention = $('#backup-attention'); if (attention) attention.innerHTML = backupAttentionMarkup();
 }
@@ -577,7 +583,19 @@ async function firebaseAction(work, message='') {
   if (cloudBusy || savingLedger) {toast('Đang có thao tác khác. Hãy hoàn tất thao tác trước.',true);return;}
   cloudBusy = true;
   try { await work(); if(message)toast(message); render(); }
-  catch(error) {toast(error.message || 'Firebase chưa thực hiện được thao tác.',true);render();}
+  catch(error) {
+    const message = {
+      'auth/popup-blocked':'Trình duyệt đã chặn cửa sổ Google. Hãy cho phép cửa sổ bật lên trên trang này rồi thử lại.',
+      'auth/popup-closed-by-user':'Đã đóng cửa sổ Google. Bạn có thể đăng nhập lại bất cứ lúc nào.',
+      'auth/cancelled-popup-request':'Yêu cầu đăng nhập đã được hủy.',
+      'auth/unauthorized-domain':'Tên miền của trang chưa được thêm vào danh sách Authorized domains trong Firebase.',
+      'auth/operation-not-allowed':'Phương thức đăng nhập này chưa được bật trong Firebase Authentication.',
+      'auth/account-exists-with-different-credential':'Email này đang dùng phương thức đăng nhập khác. Hãy đăng nhập bằng phương thức đã dùng trước đây.',
+      'auth/network-request-failed':'Mất kết nối khi đăng nhập. Hãy kiểm tra mạng rồi thử lại.',
+    }[error.code];
+    toast(message || error.message || 'Không thể kết nối Firebase.',true);
+    render();
+  }
   finally {cloudBusy=false;}
 }
 function firebaseConfigure() {
@@ -688,16 +706,16 @@ function renderSettings() {
   const lastBackup = ledger.lastBackupAt();
   return `${pageHeader('Cài đặt & dữ liệu','Thông tin cá nhân, sao lưu và khôi phục sổ.')}
   <div class="settings-grid">
+    ${firebaseMarkup()}
     <section class="card settings-section backup-settings"><div class="card-header"><h2 class="card-title">Sao lưu tự động</h2></div><div class="card-body" id="automatic-backup-content">${autoBackupMarkup()}</div></section>
     ${renderPwaSettings()}
     ${securityMarkup()}
     ${cloudMarkup()}
-    ${firebaseMarkup()}
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Giao diện</h2></div><div class="card-body"><div class="form-group"><label for="theme-preference">Chế độ hiển thị</label><select id="theme-preference" class="form-control">${[['system','Theo hệ thống'],['light','Sáng'],['dark','Tối']].map(([value,label])=>`<option value="${value}" ${getThemePreference()===value?'selected':''}>${label}</option>`).join('')}</select></div><p class="helper-text">Lựa chọn được nhớ trên trình duyệt này. Bạn cũng có thể đổi nhanh bằng nút ở góc trên.</p></div></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Thông tin cá nhân</h2></div><form id="profile-form" class="card-body"><div class="form-group"><label for="profile-name">Tên hiển thị</label><input id="profile-name" class="form-control" name="name" value="${esc(profileDraft ?? state.profile.name)}" required maxlength="60"></div><div class="form-group"><label for="currency">Đơn vị tiền tệ</label><input id="currency" class="form-control" value="Việt Nam đồng (VND)" disabled></div><button class="btn primary" type="submit">Lưu thay đổi</button><button class="btn ghost" type="button" data-action="discard-profile-draft">Hủy sửa tên</button></form></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Sao lưu & khôi phục</h2></div><div class="card-body"><p>Sổ được lưu trên trình duyệt này. Tải bản sao JSON để giữ dữ liệu khi đổi thiết bị, đổi địa chỉ website hoặc xóa dữ liệu duyệt web.</p><div class="backup-status"><span>Lần xuất gần nhất</span><strong>${timestampLabel(lastBackup)}</strong></div><div class="settings-actions"><button class="btn secondary" data-action="backup">${icon('download')}${corruptRaw!==null?'Tải dữ liệu gốc bị lỗi':'Tải bản sao JSON'}</button><button class="btn secondary" data-action="share-backup">${icon('upload')}Lưu / chia sẻ bản sao</button><button class="btn secondary" data-action="import">${icon('upload')}Nhập bản sao JSON</button></div><input id="import-file" type="file" accept=".json,application/json" hidden><p class="helper-text">Nhập bản sao sẽ thay thế sổ hiện tại sau khi xác nhận. Hỗ trợ cả bản sao từ phiên bản cũ.</p>${corruptRaw!==null?`<p class="helper-text">Sổ đang hiển thị có ${state.transactions.length} giao dịch. JSON của sổ này không chứa dữ liệu gốc bị lỗi.</p><button class="btn secondary" data-action="backup-visible">Tải sổ đang hiển thị (JSON)</button>`:''}</div></section>
     <section class="card settings-section"><div class="card-header"><h2 class="card-title">Bản phục hồi trên thiết bị</h2></div><div class="card-body"><p>App giữ một trạng thái hợp lệ trước lần lưu gần nhất, để khôi phục khi sửa hoặc xóa nhầm.</p>${recovery?`<div class="backup-status"><span>${timestampLabel(recovery.savedAt)}</span><strong>${recovery.state.transactions.length} giao dịch · ${recovery.state.accounts.length} ví</strong></div><div class="settings-actions"><button class="btn secondary" data-action="download-recovery">${icon('download')}Tải bản phục hồi</button><button class="btn secondary" data-action="restore-recovery">Khôi phục trạng thái này</button></div>`:'<p class="helper-text">Chưa có bản phục hồi. App sẽ tạo bản này khi bạn lưu thay đổi.</p>'}<p class="helper-text">Bản này nằm cùng trình duyệt với sổ, nên không thay thế bản sao JSON bạn tải về.</p></div></section>
-    <section class="card settings-section"><div class="card-header"><h2 class="card-title">Quản lý sổ</h2></div><div class="card-body"><div class="settings-counts"><div><strong>${state.transactions.length}</strong><span>Giao dịch</span></div><div><strong>${state.accounts.length}</strong><span>Ví</span></div><div><strong>${state.goals.length}</strong><span>Mục tiêu</span></div></div><p class="helper-text">${state.demo?'Sổ đang chứa dữ liệu mẫu.':'Sổ cá nhân.'} ${vault.enabled?'Sổ đang mã hóa tại chỗ.':'Sổ chưa mã hóa.'} Đồng bộ Firebase hoặc GitHub Gist là tùy chọn và cần thiết lập riêng; app không kết nối ngân hàng.</p><div class="settings-actions"><button class="btn danger" data-action="start-fresh">Xóa dữ liệu, tạo sổ mới</button><button class="btn ghost" data-action="load-demo">Nạp dữ liệu mẫu</button></div><p class="helper-text">Money Management · Phiên bản 1.5.1</p></div></section>
+    <section class="card settings-section"><div class="card-header"><h2 class="card-title">Quản lý sổ</h2></div><div class="card-body"><div class="settings-counts"><div><strong>${state.transactions.length}</strong><span>Giao dịch</span></div><div><strong>${state.accounts.length}</strong><span>Ví</span></div><div><strong>${state.goals.length}</strong><span>Mục tiêu</span></div></div><p class="helper-text">${state.demo?'Sổ đang chứa dữ liệu mẫu.':'Sổ cá nhân.'} ${vault.enabled?'Sổ đang mã hóa tại chỗ.':'Sổ chưa mã hóa.'} Đồng bộ Firebase hoặc GitHub Gist là tùy chọn và cần thiết lập riêng; app không kết nối ngân hàng.</p><div class="settings-actions"><button class="btn danger" data-action="start-fresh">Xóa dữ liệu, tạo sổ mới</button><button class="btn ghost" data-action="load-demo">Nạp dữ liệu mẫu</button></div><p class="helper-text">Money Management · Phiên bản 1.6.0</p></div></section>
   </div>`;
 }
 
@@ -878,6 +896,8 @@ function handleAction(event) {
     'enable-vault':enableVault,'backup-encrypted':downloadEncryptedBackup,'lock-vault':()=>location.reload(),
     'cloud-connect':cloudConnect,'cloud-check':()=>cloud.check().then(()=>toast(cloud.status().remoteChanges?'Có thay đổi trên đám mây. Hãy xem và chọn bản cần giữ.':'Đám mây không có thay đổi mới.')),'cloud-pull':cloudPull,'cloud-push':cloudPush,'cloud-disconnect':cloudDisconnect,
     'firebase-configure':firebaseConfigure,
+    'firebase-google':()=>firebaseAction(()=>firebaseSync.signInGoogle(),'Đã đăng nhập bằng Google.'),
+    'firebase-retry':()=>firebaseAction(()=>firebaseSync.start()),
     'firebase-login':()=>firebaseLogin(false),'firebase-register':()=>firebaseLogin(true),'firebase-reset-password':firebaseResetPassword,
     'firebase-create-cloud':()=>firebaseCloudAction(true),'firebase-connect-cloud':()=>firebaseCloudAction(false),
     'firebase-use-cloud':firebaseUseCloud,'firebase-keep-local':firebaseKeepLocal,

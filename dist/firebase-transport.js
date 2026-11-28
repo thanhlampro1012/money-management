@@ -21,6 +21,9 @@ export async function createFirebaseTransport(config, { onAuthChanged = () => {}
   const app = appApi.getApps().find(item => item.name === name) || appApi.initializeApp(config, name);
   const auth = authApi.getAuth(app);
   await authApi.setPersistence(auth, authApi.browserLocalPersistence);
+  const google = new authApi.GoogleAuthProvider();
+  google.setCustomParameters({ prompt: 'select_account' });
+  auth.languageCode = 'vi';
   const db = dbApi.getFirestore(app);
   let unsubAuth = null;
   const docFor = uid => dbApi.doc(db, 'users', uid, 'private', 'ledger');
@@ -39,6 +42,7 @@ export async function createFirebaseTransport(config, { onAuthChanged = () => {}
   unsubAuth = authApi.onAuthStateChanged(auth, user => onAuthChanged(user ? { uid: user.uid, email: user.email || '' } : null), onError);
   return {
     currentUser: () => auth.currentUser ? { uid: auth.currentUser.uid, email: auth.currentUser.email || '' } : null,
+    signInGoogle: () => authApi.signInWithPopup(auth, google),
     signIn: (email, password) => authApi.signInWithEmailAndPassword(auth, email, password),
     signUp: (email, password) => authApi.createUserWithEmailAndPassword(auth, email, password),
     signOut: () => authApi.signOut(auth),
